@@ -28,6 +28,8 @@ go build -o araneae ./cmd/araneae
 The site includes:
 
 - duplicate links to `/guide.html`
+- secondary-page discovery from `/guide.html` to `/reference.html`
+- a link loop between `/loop-a.html` and `/loop-b.html`
 - a valid fragment link to `#quick-start`
 - a missing fragment link to `#missing-fragment`
 - an external link to `https://example.com/`
