@@ -1,10 +1,15 @@
 package cli
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
+	"os"
+
+	"github.com/cpcf/araneae/internal/report"
+	"github.com/cpcf/araneae/internal/ui"
 )
 
 type serveOptions struct {
@@ -36,11 +41,32 @@ func RunServe(args []string) error {
 	if err != nil {
 		return err
 	}
-	return fmt.Errorf("%w: report=%q addr=%q",
-		errServeNotImplemented,
-		opts.reportPath,
-		opts.addr,
-	)
-}
 
-var errServeNotImplemented = errors.New("serve is not implemented yet")
+	reportData, err := report.Read(opts.reportPath)
+	if err != nil {
+		return err
+	}
+
+	handler, err := ui.NewHandler(reportData)
+	if err != nil {
+		return err
+	}
+
+	listener, err := net.Listen("tcp", opts.addr)
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
+
+	uiURL, err := ui.ServeURL(listener.Addr())
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stdout, "Serving araneae report at %s\n", uiURL+"/")
+
+	server := &http.Server{Handler: handler}
+	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+		return err
+	}
+	return nil
+}

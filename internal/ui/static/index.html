@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Araneae Report</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="header">
+      <div class="container">
+        <h1>Araneae Report</h1>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="toolbar">
+        <button id="view-links" class="btn active" type="button">Problem Links</button>
+        <button id="view-skipped" class="btn" type="button">Skipped Links</button>
+        <span class="toolbar-divider"></span>
+        <label class="control">
+          <span>Filter</span>
+          <select id="filter-select">
+            <option value="all" selected>All</option>
+            <option value="dead">Dead</option>
+            <option value="non200">Non-200</option>
+            <option value="redirecting">Redirecting</option>
+            <option value="ok">OK</option>
+          </select>
+        </label>
+        <label class="control">
+          <span>Sort</span>
+          <select id="sort-select">
+            <option value="status" selected>Status</option>
+            <option value="count-desc">Count (high to low)</option>
+            <option value="count-asc">Count (low to high)</option>
+            <option value="url">URL</option>
+            <option value="source-count-desc">Source count (high to low)</option>
+            <option value="source-count-asc">Source count (low to high)</option>
+          </select>
+        </label>
+        <label class="control">
+          <span>Search</span>
+          <input id="search-input" type="search" placeholder="Search URL or source URL" />
+        </label>
+      </section>
+
+      <section class="metrics" aria-live="polite">
+        <article class="metric">
+          <h2>Links discovered</h2>
+          <p id="metric-discovered">0</p>
+        </article>
+        <article class="metric">
+          <h2>Link occurrences</h2>
+          <p id="metric-occurrences">0</p>
+        </article>
+        <article class="metric">
+          <h2>Dead links</h2>
+          <p id="metric-dead">0</p>
+        </article>
+        <article class="metric">
+          <h2>Non-200</h2>
+          <p id="metric-non200">0</p>
+        </article>
+        <article class="metric">
+          <h2>Skipped</h2>
+          <p id="metric-skipped">0</p>
+        </article>
+        <article class="metric">
+          <h2>OK</h2>
+          <p id="metric-ok">0</p>
+        </article>
+      </section>
+
+      <section class="panel">
+        <div id="summary" class="summary"></div>
+        <div id="links-view">
+          <div class="table-scroll">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Link</th>
+                  <th>Status</th>
+                  <th>Uses</th>
+                  <th>Source pages and snippets</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="links-tbody"></tbody>
+            </table>
+          </div>
+          <p id="links-empty" class="muted">No links match this filter.</p>
+        </div>
+        <div id="skipped-view" class="hidden">
+          <div class="table-scroll">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Link</th>
+                  <th>Reason</th>
+                  <th>Uses</th>
+                  <th>Source pages and snippets</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="skipped-tbody"></tbody>
+            </table>
+          </div>
+          <p id="skipped-empty" class="muted">No skipped links in this report.</p>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Link detail</h2>
+        <div id="detail-empty" class="muted">Select a link row to review sources and fetch metadata.</div>
+        <div id="detail-content" class="hidden">
+          <div class="detail-grid">
+            <article>
+              <h3>Health</h3>
+              <p><strong>URL:</strong> <span id="detail-url"></span></p>
+              <p><strong>Fetch URL:</strong> <span id="detail-fetch"></span></p>
+              <p><strong>Status code:</strong> <span id="detail-status-code"></span></p>
+              <p><strong>Status:</strong> <span id="detail-status"></span></p>
+            </article>
+            <article>
+              <h3>Redirects / error</h3>
+              <p><strong>Final URL:</strong> <span id="detail-final"></span></p>
+              <p><strong>Problem:</strong> <span id="detail-problem"></span></p>
+              <p><strong>Error:</strong> <span id="detail-error"></span></p>
+              <p><strong>Content type:</strong> <span id="detail-content-type"></span></p>
+              <p><strong>Redirect chain:</strong> <span id="detail-redirect"></span></p>
+            </article>
+          </div>
+          <h3>Sources</h3>
+          <ul id="detail-sources" class="sources-list"></ul>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
