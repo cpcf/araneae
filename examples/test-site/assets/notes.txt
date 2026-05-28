@@ -1,0 +1,3 @@
+Araneae local test note file.
+
+This is intentionally not HTML so it should be marked as a checked non-HTML link target.

@@ -57,7 +57,7 @@ func (f *HTTPFetcher) Fetch(ctx context.Context, fetchURL string) (FetchResult, 
 	request.Header.Set("User-Agent", f.userAgent)
 
 	redirects := []string{}
-	client := f.client
+	client := *f.client
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		redirects = append(redirects, req.URL.String())
 		if len(via) >= 10 {

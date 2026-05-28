@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cpcf/araneae/internal/report"
@@ -118,6 +119,43 @@ func (c *Crawler) Run(ctx context.Context) (report.Report, error) {
 	visited := map[string]bool{}
 	queued := map[string]bool{}
 	queue := make([]string, 0)
+	type fetchOutcome struct {
+		fetch FetchResult
+		err   error
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	taskCh := make(chan string, c.opts.Concurrency)
+	resultCh := make(chan fetchOutcome, c.opts.Concurrency)
+	var workerWG sync.WaitGroup
+
+	startWorkers := func() {
+		for i := 0; i < c.opts.Concurrency; i++ {
+			workerWG.Add(1)
+			go func() {
+				defer workerWG.Done()
+				for fetchURL := range taskCh {
+					fetch, err := c.fetcher.Fetch(ctx, fetchURL)
+					resultCh <- fetchOutcome{fetch: fetch, err: err}
+				}
+			}()
+		}
+	}
+
+	popQueue := func() (string, bool) {
+		for len(queue) > 0 {
+			fetchURL := queue[0]
+			queue = queue[1:]
+			if !queued[fetchURL] {
+				continue
+			}
+			delete(queued, fetchURL)
+			return fetchURL, true
+		}
+		return "", false
+	}
 
 	addToQueue := func(fetchURL string) {
 		if fetchURL == "" {
@@ -218,22 +256,52 @@ func (c *Crawler) Run(ctx context.Context) (report.Report, error) {
 	visited[entryFetch.URL] = true
 	processFetch(entryFetch)
 
+	startWorkers()
+
 	attempted := 1
-	for len(queue) > 0 && attempted < c.opts.MaxPages {
-		fetchURL := queue[0]
-		queue = queue[1:]
-		queued[fetchURL] = false
-		if visited[fetchURL] {
+	inFlight := 0
+
+	for {
+		for c.opts.MaxPages > attempted && inFlight < c.opts.Concurrency && len(queue) > 0 {
+			next, ok := popQueue()
+			if !ok {
+				continue
+			}
+			if visited[next] {
+				continue
+			}
+			visited[next] = true
+			inFlight++
+			attempted++
+			taskCh <- next
+		}
+
+		if inFlight == 0 {
+			if len(queue) == 0 || c.opts.MaxPages <= attempted {
+				break
+			}
+		}
+
+		if inFlight == 0 {
 			continue
 		}
-		fetchResult, err := c.fetcher.Fetch(ctx, fetchURL)
-		if err != nil {
-			return report.Report{}, fmt.Errorf("fetch request failed: %w", err)
+
+		outcome := <-resultCh
+		inFlight--
+
+		if outcome.err != nil {
+			cancel()
+			close(taskCh)
+			workerWG.Wait()
+			close(resultCh)
+			return report.Report{}, fmt.Errorf("fetch request failed: %w", outcome.err)
 		}
-		visited[fetchURL] = true
-		processFetch(fetchResult)
-		attempted++
+		processFetch(outcome.fetch)
 	}
+
+	close(taskCh)
+	workerWG.Wait()
+	close(resultCh)
 
 	summary := report.ReportSummary{
 		LinksDiscovered:  len(links),

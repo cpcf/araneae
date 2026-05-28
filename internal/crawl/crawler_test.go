@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,7 +28,7 @@ func TestSequentialCrawlerDuplicateCounts(t *testing.T) {
 	}))
 	defer server.Close()
 
-	reportData := runScan(t, server.URL+"/", 10)
+	reportData := runScan(t, server.URL+"/", 10, 1)
 
 	if got := reportData.Summary.LinksDiscovered; got != 1 {
 		t.Fatalf("links discovered = %d; want 1", got)
@@ -58,7 +60,7 @@ func TestSequentialCrawlerSkipsExternalLinks(t *testing.T) {
 	}))
 	defer server.Close()
 
-	reportData := runScan(t, server.URL+"/", 10)
+	reportData := runScan(t, server.URL+"/", 10, 1)
 
 	if got := reportData.Summary.SkippedLinks; got != 1 {
 		t.Fatalf("skipped links = %d; want 1", got)
@@ -86,7 +88,7 @@ func TestSequentialCrawlerAvoidsCycles(t *testing.T) {
 	}))
 	defer server.Close()
 
-	reportData := runScan(t, server.URL+"/", 10)
+	reportData := runScan(t, server.URL+"/", 10, 1)
 
 	if reportData.Summary.FetchesAttempted != 2 {
 		t.Fatalf("fetches attempted = %d; want 2", reportData.Summary.FetchesAttempted)
@@ -114,7 +116,7 @@ func TestSequentialCrawlerMaxPagesTruncates(t *testing.T) {
 	}))
 	defer server.Close()
 
-	reportData := runScan(t, server.URL+"/", 1)
+	reportData := runScan(t, server.URL+"/", 1, 1)
 
 	if !reportData.Summary.Truncated {
 		t.Fatal("expected report to be truncated")
@@ -142,7 +144,7 @@ func TestSequentialCrawlerNon200Handled(t *testing.T) {
 	}))
 	defer server.Close()
 
-	reportData := runScan(t, server.URL+"/", 10)
+	reportData := runScan(t, server.URL+"/", 10, 1)
 
 	if got := reportData.Summary.Non200Links; got != 1 {
 		t.Fatalf("non-200 links = %d; want 1", got)
@@ -172,7 +174,7 @@ func TestSequentialCrawlerRedirectChainRecorded(t *testing.T) {
 	}))
 	defer server.Close()
 
-	reportData := runScan(t, server.URL+"/", 10)
+	reportData := runScan(t, server.URL+"/", 10, 1)
 
 	if len(reportData.Fetches) != 2 {
 		t.Fatalf("fetches = %d; want 2", len(reportData.Fetches))
@@ -211,7 +213,7 @@ func TestSequentialCrawlerFragments(t *testing.T) {
 	}))
 	defer server.Close()
 
-	reportData := runScan(t, server.URL+"/", 10)
+	reportData := runScan(t, server.URL+"/", 10, 1)
 
 	if got := len(reportData.Links); got != 2 {
 		t.Fatalf("links = %d; want 2", got)
@@ -254,7 +256,7 @@ func TestSequentialCrawlerParsesOnlyHTML(t *testing.T) {
 	}))
 	defer server.Close()
 
-	reportData := runScan(t, server.URL+"/", 10)
+	reportData := runScan(t, server.URL+"/", 10, 1)
 
 	if reportData.Summary.FetchesAttempted != 4 {
 		t.Fatalf("fetches attempted = %d; want 4", reportData.Summary.FetchesAttempted)
@@ -268,20 +270,206 @@ func TestSequentialCrawlerParsesOnlyHTML(t *testing.T) {
 	}
 }
 
-func runScan(t *testing.T, entry string, maxPages int) report.Report {
+func TestCrawlerConcurrentFetches(t *testing.T) {
+	entry := "https://docs.example.test/"
+	fetcher := newScriptedFetcher(map[string]scriptedFetch{
+		entry: {
+			status:      http.StatusOK,
+			contentType: "text/html; charset=utf-8",
+			body:        `<a href="/a">A</a><a href="/b">B</a><a href="/c">C</a>`,
+		},
+		"https://docs.example.test/a": {
+			status:      http.StatusOK,
+			contentType: "text/html; charset=utf-8",
+			body:        "<p>alpha</p>",
+		},
+		"https://docs.example.test/b": {
+			status:      http.StatusOK,
+			contentType: "text/html; charset=utf-8",
+			body:        "<p>bravo</p>",
+		},
+		"https://docs.example.test/c": {
+			status:      http.StatusOK,
+			contentType: "text/html; charset=utf-8",
+			body:        "<p>charlie</p>",
+		},
+	}, 50*time.Millisecond)
+
+	reportData := runScanWithFetcher(t, entry, 4, 3, fetcher)
+
+	if reportData.Summary.FetchesAttempted != 4 {
+		t.Fatalf("fetches attempted = %d; want 4", reportData.Summary.FetchesAttempted)
+	}
+	if got := fetcher.maxConcurrent(); got < 2 {
+		t.Fatalf("max concurrent fetches = %d; want >= 2", got)
+	}
+}
+
+func TestCrawlerMaxPagesRespectsConcurrencyLimit(t *testing.T) {
+	entry := "https://docs.example.test/"
+	fetcher := newScriptedFetcher(map[string]scriptedFetch{
+		entry: {
+			status:      http.StatusOK,
+			contentType: "text/html; charset=utf-8",
+			body:        `<a href="/a">A</a><a href="/b">B</a><a href="/c">C</a>`,
+		},
+		"https://docs.example.test/a": {
+			status:      http.StatusOK,
+			contentType: "text/html; charset=utf-8",
+			body:        "<p>alpha</p>",
+		},
+		"https://docs.example.test/b": {
+			status:      http.StatusOK,
+			contentType: "text/html; charset=utf-8",
+			body:        "<p>bravo</p>",
+		},
+		"https://docs.example.test/c": {
+			status:      http.StatusOK,
+			contentType: "text/html; charset=utf-8",
+			body:        "<p>charlie</p>",
+		},
+	}, 50*time.Millisecond)
+
+	reportData := runScanWithFetcher(t, entry, 2, 3, fetcher)
+
+	if !reportData.Summary.Truncated {
+		t.Fatal("expected report to be truncated")
+	}
+	if reportData.Summary.FetchesAttempted != 2 {
+		t.Fatalf("fetches attempted = %d; want 2", reportData.Summary.FetchesAttempted)
+	}
+	if reportData.Summary.UnvisitedURLs != 2 {
+		t.Fatalf("unvisited urls = %d; want 2", reportData.Summary.UnvisitedURLs)
+	}
+}
+
+func TestCrawlerAvoidsDuplicateFetchesWithConcurrency(t *testing.T) {
+	entry := "https://docs.example.test/"
+	fetcher := newScriptedFetcher(map[string]scriptedFetch{
+		entry: {
+			status:      http.StatusOK,
+			contentType: "text/html; charset=utf-8",
+			body:        `<a href="/a">A</a><a href="/b">B</a>`,
+		},
+		"https://docs.example.test/a": {
+			status:      http.StatusOK,
+			contentType: "text/html; charset=utf-8",
+			body:        `<a href="/shared">shared</a><a href="/b">to-b</a>`,
+		},
+		"https://docs.example.test/b": {
+			status:      http.StatusOK,
+			contentType: "text/html; charset=utf-8",
+			body:        `<a href="/shared">shared</a><a href="/a">to-a</a>`,
+		},
+		"https://docs.example.test/shared": {
+			status:      http.StatusOK,
+			contentType: "text/html; charset=utf-8",
+			body:        "<p>shared page</p>",
+		},
+	}, 0)
+
+	reportData := runScanWithFetcher(t, entry, 10, 3, fetcher)
+
+	if reportData.Summary.FetchesAttempted != 4 {
+		t.Fatalf("fetches attempted = %d; want 4", reportData.Summary.FetchesAttempted)
+	}
+	if got := len(reportData.Fetches); got != 4 {
+		t.Fatalf("fetch records = %d; want 4", got)
+	}
+}
+
+func runScan(t *testing.T, entry string, maxPages int, concurrency int) report.Report {
+	return runScanWithFetcher(t, entry, maxPages, concurrency, nil)
+}
+
+func runScanWithFetcher(t *testing.T, entry string, maxPages int, concurrency int, fetcher Fetcher) report.Report {
 	t.Helper()
 	result, err := Run(context.Background(), ScanOptions{
 		EntryURL:    entry,
 		MaxPages:    maxPages,
 		Timeout:     2 * time.Second,
 		UserAgent:   "araneae-test",
-		Concurrency: 1,
+		Concurrency: concurrency,
+		Fetcher:     fetcher,
 		PathPrefix:  "",
 	})
 	if err != nil {
 		t.Fatalf("run scanner: %v", err)
 	}
 	return result
+}
+
+type scriptedFetch struct {
+	status      int
+	contentType string
+	body        string
+	finalURL    string
+	redirects   []string
+}
+
+type scriptedFetcher struct {
+	mu          sync.RWMutex
+	pages       map[string]scriptedFetch
+	delay       time.Duration
+	inFlight    int32
+	maxInFlight int32
+}
+
+func newScriptedFetcher(pages map[string]scriptedFetch, delay time.Duration) *scriptedFetcher {
+	return &scriptedFetcher{
+		pages: pages,
+		delay: delay,
+	}
+}
+
+func (f *scriptedFetcher) Fetch(_ context.Context, fetchURL string) (FetchResult, error) {
+	current := atomic.AddInt32(&f.inFlight, 1)
+	for {
+		observed := atomic.LoadInt32(&f.maxInFlight)
+		if current <= observed {
+			break
+		}
+		if atomic.CompareAndSwapInt32(&f.maxInFlight, observed, current) {
+			break
+		}
+	}
+	defer atomic.AddInt32(&f.inFlight, -1)
+
+	if f.delay > 0 {
+		time.Sleep(f.delay)
+	}
+
+	f.mu.RLock()
+	page, ok := f.pages[fetchURL]
+	f.mu.RUnlock()
+
+	if !ok {
+		return FetchResult{
+			URL:         fetchURL,
+			StatusCode:  http.StatusNotFound,
+			ContentType: "text/html; charset=utf-8",
+			CheckedAt:   time.Now().UTC(),
+		}, nil
+	}
+
+	finalURL := page.finalURL
+	if finalURL == "" {
+		finalURL = fetchURL
+	}
+
+	return FetchResult{
+		URL:           fetchURL,
+		StatusCode:    page.status,
+		FinalURL:      finalURL,
+		ContentType:   page.contentType,
+		Body:          []byte(page.body),
+		RedirectChain: append([]string{}, page.redirects...),
+		CheckedAt:     time.Now().UTC(),
+	}, nil
+}
+
+func (f *scriptedFetcher) maxConcurrent() int {
+	return int(atomic.LoadInt32(&f.maxInFlight))
 }
 
 func findLinkByURL(r report.Report, url string) *report.LinkResult {
