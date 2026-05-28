@@ -120,7 +120,7 @@ function renderLinks() {
 
     row.innerHTML = `
       <td>
-        <div class="url-main">${escapeText(link.url)}</div>
+        <div class="url-main">${linkAnchorHTML(link.url)}</div>
         ${link.fetch_url && link.fetch_url !== link.url ? `<div class="url-sub">Fetches as ${escapeText(link.fetch_url)}</div>` : ""}
       </td>
       <td>
@@ -152,6 +152,10 @@ function renderLinks() {
       copyToClipboard(firstSource);
     });
 
+    row.querySelector(".url-main a").addEventListener("click", (event) => {
+      event.stopPropagation();
+    });
+
     linksTbody.appendChild(row);
   }
 }
@@ -171,7 +175,7 @@ function renderSkipped() {
     const copyVisible = copySupport ? "" : "hidden";
     const row = document.createElement("tr");
     row.innerHTML = `
-      <td><div class="url-main">${escapeText(item.url)}</div></td>
+      <td><div class="url-main">${linkAnchorHTML(item.url)}</div></td>
       <td>${escapeText(item.reason || "")}</td>
       <td>
         <strong>${escapeText(String(item.count || 0))}</strong>
@@ -192,6 +196,10 @@ function renderSkipped() {
     row.querySelector(".copy-source-btn").addEventListener("click", (event) => {
       event.stopPropagation();
       copyToClipboard(firstSource);
+    });
+
+    row.querySelector(".url-main a").addEventListener("click", (event) => {
+      event.stopPropagation();
     });
 
     skippedTbody.appendChild(row);
@@ -425,6 +433,13 @@ function sourcePreviewHTML(sources, limit) {
   }
 
   return `<div class="source-preview">${rows.join("")}</div>`;
+}
+
+function linkAnchorHTML(url) {
+  if (!url) {
+    return "";
+  }
+  return `<a href="${escapeAttribute(url)}" rel="noreferrer noopener" target="_blank">${escapeText(url)}</a>`;
 }
 
 function firstSourceURL(sources) {

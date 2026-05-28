@@ -206,6 +206,10 @@ body {
   font-weight: 600;
 }
 
+.url-main a {
+  overflow-wrap: anywhere;
+}
+
 .url-sub,
 .status-note,
 .source-meta {
