@@ -1,13 +1,17 @@
 package cli
 
 import (
-	"errors"
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"net/url"
+	"os"
 	"strings"
 	"time"
+
+	"github.com/cpcf/araneae/internal/crawl"
+	"github.com/cpcf/araneae/internal/report"
 )
 
 type scanOptions struct {
@@ -78,19 +82,36 @@ func RunScan(args []string) error {
 		return err
 	}
 
-	return fmt.Errorf("%w: entry-url=%q out=%q max-pages=%d timeout=%s concurrency=%d path-prefix=%q allow-hosts=%v user-agent=%q fail-on-dead=%t fail-on-non-200=%t",
-		errScanNotImplemented,
-		opts.entryURL,
-		opts.out,
-		opts.maxPages,
-		opts.timeout,
-		opts.concurrency,
-		opts.pathPrefix,
-		opts.allowHosts,
-		opts.userAgent,
-		opts.failOnDead,
-		opts.failOnNon200,
-	)
-}
+	crawler := crawl.ScanOptions{
+		EntryURL:    opts.entryURL,
+		MaxPages:    opts.maxPages,
+		Timeout:     opts.timeout,
+		Concurrency: opts.concurrency,
+		AllowHosts:  opts.allowHosts,
+		PathPrefix:  opts.pathPrefix,
+		UserAgent:   opts.userAgent,
+	}
+	reportData, err := crawl.Run(context.Background(), crawler)
+	if err != nil {
+		return err
+	}
 
-var errScanNotImplemented = errors.New("scan is not implemented yet")
+	outputFile, err := os.Create(opts.out)
+	if err != nil {
+		return err
+	}
+	defer outputFile.Close()
+
+	if err := report.Write(outputFile, reportData); err != nil {
+		return err
+	}
+
+	if opts.failOnDead && reportData.Summary.DeadLinks > 0 {
+		return fmt.Errorf("scan found dead links: %d", reportData.Summary.DeadLinks)
+	}
+	if opts.failOnNon200 && reportData.Summary.Non200Links > 0 {
+		return fmt.Errorf("scan found non-200 links: %d", reportData.Summary.Non200Links)
+	}
+
+	return nil
+}
