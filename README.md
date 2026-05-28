@@ -21,23 +21,49 @@ Araneae:
 
 Araneae does not execute JavaScript, authenticate to private sites, crawl external sites by default, or check image/script/style assets in the first version.
 
+## Dependencies
+
+For most technical writers, the recommended install path is a compiled release binary. Release binaries do not require Go or any other runtime dependency.
+
+If you install from source or build Araneae yourself, you need Go. This repository currently targets Go 1.26.2.
+
+- Official Go install instructions: [go.dev/doc/install](https://go.dev/doc/install)
+- After installing Go, verify it is available:
+
+```sh
+go version
+```
+
 ## Install
 
-Araneae is written in Go and this repository currently targets Go 1.26.2.
+### Option 1: Download a release binary
 
-From this repository:
+For Araneae 1.0 and later, download the binary for your operating system from the [GitHub releases page](https://github.com/cpcf/araneae/releases).
+
+1. Download the archive for your platform.
+2. Unpack it.
+3. Move the `araneae` executable somewhere on your `PATH`.
+4. Verify the command is available:
+
+```sh
+araneae help
+```
+
+### Option 2: Install from source
+
+Use this option if you are comfortable with Go tooling or need the latest code from the repository.
 
 ```sh
 go install ./cmd/araneae
 ```
 
-Or build a local binary:
+### Option 3: Build a local binary
 
 ```sh
 go build -o araneae ./cmd/araneae
 ```
 
-During development you can run it without installing:
+### Option 4: Run without installing
 
 ```sh
 go run ./cmd/araneae scan https://docs.example.com/
@@ -257,8 +283,7 @@ python3 -m http.server 8000
 Then scan it:
 
 ```sh
-cd /path/to/araneae
-go run ./cmd/araneae scan http://127.0.0.1:8000/index.html \
+araneae scan http://127.0.0.1:8000/index.html \
   --out report.json \
   --max-pages 20 \
   --concurrency 4
