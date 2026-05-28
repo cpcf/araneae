@@ -597,7 +597,7 @@ func (g *manualRequestGate) releaseOne() {
 }
 
 func (g *manualRequestGate) releaseN(count int) {
-	for i := 0; i < count; i++ {
+	for range count {
 		g.releaseOne()
 	}
 }

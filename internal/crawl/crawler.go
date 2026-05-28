@@ -142,9 +142,7 @@ func (c *Crawler) Run(ctx context.Context) (report.Report, error) {
 
 	startWorkers := func() {
 		for i := 0; i < c.opts.Concurrency; i++ {
-			workerWG.Add(1)
-			go func() {
-				defer workerWG.Done()
+			workerWG.Go(func() {
 				for fetchURL := range taskCh {
 					err := requestGate.Wait(ctx)
 					var fetch FetchResult
@@ -153,7 +151,7 @@ func (c *Crawler) Run(ctx context.Context) (report.Report, error) {
 					}
 					resultCh <- fetchOutcome{fetch: fetch, err: err}
 				}
-			}()
+			})
 		}
 	}
 
