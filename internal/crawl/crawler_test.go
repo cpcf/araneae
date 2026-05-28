@@ -378,6 +378,88 @@ func TestCrawlerAvoidsDuplicateFetchesWithConcurrency(t *testing.T) {
 	}
 }
 
+func TestCrawlerRequestGateAppliesAcrossConcurrentWorkers(t *testing.T) {
+	entry := "https://docs.example.test/"
+	fetcher := newScriptedFetcher(map[string]scriptedFetch{
+		entry: {
+			status:      http.StatusOK,
+			contentType: "text/html; charset=utf-8",
+			body:        `<a href="/a">A</a><a href="/b">B</a><a href="/c">C</a>`,
+		},
+		"https://docs.example.test/a": {
+			status:      http.StatusOK,
+			contentType: "text/html; charset=utf-8",
+			body:        "<p>alpha</p>",
+		},
+		"https://docs.example.test/b": {
+			status:      http.StatusOK,
+			contentType: "text/html; charset=utf-8",
+			body:        "<p>bravo</p>",
+		},
+		"https://docs.example.test/c": {
+			status:      http.StatusOK,
+			contentType: "text/html; charset=utf-8",
+			body:        "<p>charlie</p>",
+		},
+	}, 0)
+	gate := newManualRequestGate()
+
+	resultCh := make(chan report.Report, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		result, err := Run(context.Background(), ScanOptions{
+			EntryURL:             entry,
+			MaxPages:             4,
+			Timeout:              2 * time.Second,
+			UserAgent:            "araneae-test",
+			Concurrency:          3,
+			MaxRequestsPerSecond: 10,
+			Fetcher:              fetcher,
+			requestGate:          gate,
+		})
+		if err != nil {
+			errCh <- err
+			return
+		}
+		resultCh <- result
+	}()
+
+	gate.waitForCalls(t, 1)
+	if got := fetcher.requestCount(); got != 0 {
+		t.Fatalf("fetches started before entry gate release = %d; want 0", got)
+	}
+	gate.releaseOne()
+	waitUntil(t, func() bool { return fetcher.requestCount() == 1 }, "entry fetch to start")
+
+	gate.waitForCalls(t, 4)
+	if got := fetcher.requestCount(); got != 1 {
+		t.Fatalf("fetches started before worker gate release = %d; want 1", got)
+	}
+
+	gate.releaseOne()
+	waitUntil(t, func() bool { return fetcher.requestCount() == 2 }, "first worker fetch to start")
+
+	gate.releaseN(2)
+	var reportData report.Report
+	select {
+	case err := <-errCh:
+		t.Fatalf("run scanner: %v", err)
+	case reportData = <-resultCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for scanner")
+	}
+
+	if reportData.Summary.FetchesAttempted != 4 {
+		t.Fatalf("fetches attempted = %d; want 4", reportData.Summary.FetchesAttempted)
+	}
+	if reportData.Limits.MaxRequestsPerSecond != 10 {
+		t.Fatalf("max requests per second = %f; want 10", reportData.Limits.MaxRequestsPerSecond)
+	}
+	if got := gate.callCount(); got != 4 {
+		t.Fatalf("request gate calls = %d; want 4", got)
+	}
+}
+
 func runScan(t *testing.T, entry string, maxPages int, concurrency int) report.Report {
 	return runScanWithFetcher(t, entry, maxPages, concurrency, nil)
 }
@@ -411,6 +493,7 @@ type scriptedFetcher struct {
 	mu          sync.RWMutex
 	pages       map[string]scriptedFetch
 	delay       time.Duration
+	requests    int32
 	inFlight    int32
 	maxInFlight int32
 }
@@ -423,6 +506,7 @@ func newScriptedFetcher(pages map[string]scriptedFetch, delay time.Duration) *sc
 }
 
 func (f *scriptedFetcher) Fetch(_ context.Context, fetchURL string) (FetchResult, error) {
+	atomic.AddInt32(&f.requests, 1)
 	current := atomic.AddInt32(&f.inFlight, 1)
 	for {
 		observed := atomic.LoadInt32(&f.maxInFlight)
@@ -470,6 +554,64 @@ func (f *scriptedFetcher) Fetch(_ context.Context, fetchURL string) (FetchResult
 
 func (f *scriptedFetcher) maxConcurrent() int {
 	return int(atomic.LoadInt32(&f.maxInFlight))
+}
+
+func (f *scriptedFetcher) requestCount() int {
+	return int(atomic.LoadInt32(&f.requests))
+}
+
+type manualRequestGate struct {
+	releases chan struct{}
+	calls    int32
+}
+
+func newManualRequestGate() *manualRequestGate {
+	return &manualRequestGate{
+		releases: make(chan struct{}, 16),
+	}
+}
+
+func (g *manualRequestGate) Wait(ctx context.Context) error {
+	atomic.AddInt32(&g.calls, 1)
+	select {
+	case <-g.releases:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (g *manualRequestGate) waitForCalls(t *testing.T, want int) {
+	t.Helper()
+	waitUntil(t, func() bool {
+		return g.callCount() >= want
+	}, "request gate calls")
+}
+
+func (g *manualRequestGate) callCount() int {
+	return int(atomic.LoadInt32(&g.calls))
+}
+
+func (g *manualRequestGate) releaseOne() {
+	g.releases <- struct{}{}
+}
+
+func (g *manualRequestGate) releaseN(count int) {
+	for i := 0; i < count; i++ {
+		g.releaseOne()
+	}
+}
+
+func waitUntil(t *testing.T, condition func() bool, description string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", description)
 }
 
 func findLinkByURL(r report.Report, url string) *report.LinkResult {

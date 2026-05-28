@@ -12,6 +12,7 @@ func TestParseScanArgsAcceptsFlagsAfterEntryURL(t *testing.T) {
 		"--max-pages", "17",
 		"--timeout", "3s",
 		"--concurrency", "2",
+		"--max-requests-per-second", "4.5",
 		"--allow-host", "https://www.example.com",
 		"--path-prefix", "/docs/",
 		"--user-agent", "custom-agent",
@@ -37,6 +38,9 @@ func TestParseScanArgsAcceptsFlagsAfterEntryURL(t *testing.T) {
 	if opts.concurrency != 2 {
 		t.Fatalf("concurrency = %d", opts.concurrency)
 	}
+	if opts.maxReqPerSec != 4.5 {
+		t.Fatalf("maxReqPerSec = %f", opts.maxReqPerSec)
+	}
 	if len(opts.allowHosts) != 1 || opts.allowHosts[0] != "https://www.example.com" {
 		t.Fatalf("allowHosts = %#v", opts.allowHosts)
 	}
@@ -48,6 +52,26 @@ func TestParseScanArgsAcceptsFlagsAfterEntryURL(t *testing.T) {
 	}
 	if !opts.failOnDead || !opts.failOnNon200 {
 		t.Fatalf("fail flags = %t %t", opts.failOnDead, opts.failOnNon200)
+	}
+}
+
+func TestParseScanArgsRejectsNegativeRateLimit(t *testing.T) {
+	_, err := ParseScanArgs([]string{
+		"https://docs.example.com/",
+		"--max-requests-per-second", "-1",
+	})
+	if err == nil {
+		t.Fatal("ParseScanArgs() error = nil; want error")
+	}
+}
+
+func TestParseScanArgsRejectsNonFiniteRateLimit(t *testing.T) {
+	_, err := ParseScanArgs([]string{
+		"https://docs.example.com/",
+		"--max-requests-per-second", "NaN",
+	})
+	if err == nil {
+		t.Fatal("ParseScanArgs() error = nil; want error")
 	}
 }
 

@@ -16,16 +16,18 @@ import (
 const sameSitePolicy = "exact_origin_with_allowlist"
 
 type ScanOptions struct {
-	EntryURL    string
-	MaxPages    int
-	Timeout     time.Duration
-	Concurrency int
-	AllowHosts  []string
-	PathPrefix  string
-	UserAgent   string
-	Fetcher     Fetcher
-	Parser      Parser
-	ForceNow    func() time.Time
+	EntryURL             string
+	MaxPages             int
+	Timeout              time.Duration
+	Concurrency          int
+	MaxRequestsPerSecond float64
+	AllowHosts           []string
+	PathPrefix           string
+	UserAgent            string
+	Fetcher              Fetcher
+	Parser               Parser
+	ForceNow             func() time.Time
+	requestGate          requestGate
 }
 
 type Crawler struct {
@@ -89,6 +91,9 @@ func (c *Crawler) now() time.Time {
 }
 
 func (c *Crawler) Run(ctx context.Context) (report.Report, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	parsedEntry, err := url.Parse(c.opts.EntryURL)
 	if err != nil {
 		return report.Report{}, fmt.Errorf("invalid entry URL: %w", err)
@@ -97,6 +102,13 @@ func (c *Crawler) Run(ctx context.Context) (report.Report, error) {
 	normalizedEntry.Fragment = ""
 	entryURL := normalizedEntry.String()
 
+	requestGate := c.opts.requestGate
+	if requestGate == nil {
+		requestGate = newRequestGate(c.opts.MaxRequestsPerSecond)
+	}
+	if err := requestGate.Wait(ctx); err != nil {
+		return report.Report{}, fmt.Errorf("rate limit wait failed: %w", err)
+	}
 	entryFetch, err := c.fetcher.Fetch(ctx, entryURL)
 	if err != nil {
 		return report.Report{}, fmt.Errorf("entry fetch request failed: %w", err)
@@ -124,9 +136,6 @@ func (c *Crawler) Run(ctx context.Context) (report.Report, error) {
 		err   error
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
 	taskCh := make(chan string, c.opts.Concurrency)
 	resultCh := make(chan fetchOutcome, c.opts.Concurrency)
 	var workerWG sync.WaitGroup
@@ -137,7 +146,11 @@ func (c *Crawler) Run(ctx context.Context) (report.Report, error) {
 			go func() {
 				defer workerWG.Done()
 				for fetchURL := range taskCh {
-					fetch, err := c.fetcher.Fetch(ctx, fetchURL)
+					err := requestGate.Wait(ctx)
+					var fetch FetchResult
+					if err == nil {
+						fetch, err = c.fetcher.Fetch(ctx, fetchURL)
+					}
 					resultCh <- fetchOutcome{fetch: fetch, err: err}
 				}
 			}()
@@ -420,9 +433,10 @@ func (c *Crawler) Run(ctx context.Context) (report.Report, error) {
 			PathPrefix:     scope.PathPrefix,
 		},
 		Limits: report.ReportLimits{
-			MaxPages:          c.opts.MaxPages,
-			RequestTimeoutSec: int(c.opts.Timeout.Seconds()),
-			MaxConcurrency:    c.opts.Concurrency,
+			MaxPages:             c.opts.MaxPages,
+			RequestTimeoutSec:    int(c.opts.Timeout.Seconds()),
+			MaxConcurrency:       c.opts.Concurrency,
+			MaxRequestsPerSecond: c.opts.MaxRequestsPerSecond,
 		},
 		Summary:      summary,
 		Links:        reportLinks,

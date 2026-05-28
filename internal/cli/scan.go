@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"net/url"
 	"os"
 	"strings"
@@ -20,6 +21,7 @@ type scanOptions struct {
 	maxPages     int
 	timeout      time.Duration
 	concurrency  int
+	maxReqPerSec float64
 	allowHosts   []string
 	pathPrefix   string
 	userAgent    string
@@ -49,6 +51,7 @@ func ParseScanArgs(args []string) (scanOptions, error) {
 	fs.IntVar(&opts.maxPages, "max-pages", 500, "maximum checked same-site fetch URLs")
 	fs.DurationVar(&opts.timeout, "timeout", 15*time.Second, "per-request timeout")
 	fs.IntVar(&opts.concurrency, "concurrency", 8, "fetch concurrency")
+	fs.Float64Var(&opts.maxReqPerSec, "max-requests-per-second", 0, "maximum request starts per second; 0 means unlimited")
 	fs.Var(&allowHosts, "allow-host", "additional exact origins allowed for crawl")
 	fs.StringVar(&opts.pathPrefix, "path-prefix", "", "optional path prefix restriction")
 	fs.StringVar(&opts.userAgent, "user-agent", "araneae/0.1", "user-agent string")
@@ -76,6 +79,9 @@ func ParseScanArgs(args []string) (scanOptions, error) {
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return opts, fmt.Errorf("%s: unsupported entry scheme %q", cmd, parsed.Scheme)
 	}
+	if opts.maxReqPerSec < 0 || math.IsNaN(opts.maxReqPerSec) || math.IsInf(opts.maxReqPerSec, 0) {
+		return opts, fmt.Errorf("%s: --max-requests-per-second must be a finite value >= 0", cmd)
+	}
 
 	return opts, nil
 }
@@ -87,13 +93,14 @@ func RunScan(args []string) error {
 	}
 
 	crawler := crawl.ScanOptions{
-		EntryURL:    opts.entryURL,
-		MaxPages:    opts.maxPages,
-		Timeout:     opts.timeout,
-		Concurrency: opts.concurrency,
-		AllowHosts:  opts.allowHosts,
-		PathPrefix:  opts.pathPrefix,
-		UserAgent:   opts.userAgent,
+		EntryURL:             opts.entryURL,
+		MaxPages:             opts.maxPages,
+		Timeout:              opts.timeout,
+		Concurrency:          opts.concurrency,
+		MaxRequestsPerSecond: opts.maxReqPerSec,
+		AllowHosts:           opts.allowHosts,
+		PathPrefix:           opts.pathPrefix,
+		UserAgent:            opts.userAgent,
 	}
 	reportData, err := crawl.Run(context.Background(), crawler)
 	if err != nil {

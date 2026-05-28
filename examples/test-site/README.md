@@ -16,6 +16,8 @@ cd /path/to/repo
 go run ./cmd/araneae scan http://127.0.0.1:8000/index.html --max-pages 20 --concurrency 4
 ```
 
+Add `--max-requests-per-second 2` if you want to verify rate limiting while scanning.
+
 If you prefer a local binary, build and run it first:
 
 ```sh

@@ -30,6 +30,10 @@ func interspersePositionals(fs *flag.FlagSet, args []string) ([]string, error) {
 			positionals = append(positionals, arg)
 			continue
 		}
+		if name == "h" || name == "help" {
+			flags = append(flags, arg)
+			continue
+		}
 
 		defined := fs.Lookup(name)
 		if defined == nil {

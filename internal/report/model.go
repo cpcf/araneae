@@ -24,9 +24,10 @@ type ReportScope struct {
 }
 
 type ReportLimits struct {
-	MaxPages          int `json:"max_pages"`
-	RequestTimeoutSec int `json:"request_timeout_seconds"`
-	MaxConcurrency    int `json:"max_concurrency"`
+	MaxPages             int     `json:"max_pages"`
+	RequestTimeoutSec    int     `json:"request_timeout_seconds"`
+	MaxConcurrency       int     `json:"max_concurrency"`
+	MaxRequestsPerSecond float64 `json:"max_requests_per_second"`
 }
 
 type ReportSummary struct {
