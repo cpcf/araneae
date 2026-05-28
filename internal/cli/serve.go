@@ -25,7 +25,11 @@ func ParseServeArgs(args []string) (serveOptions, error) {
 	var opts serveOptions
 	fs.StringVar(&opts.addr, "addr", "127.0.0.1:0", "local listen address")
 
-	if err := fs.Parse(args); err != nil {
+	orderedArgs, err := interspersePositionals(fs, args)
+	if err != nil {
+		return opts, fmt.Errorf("%s: %w", cmd, err)
+	}
+	if err := fs.Parse(orderedArgs); err != nil {
 		return opts, fmt.Errorf("%s: %w", cmd, err)
 	}
 	if fs.NArg() != 1 {

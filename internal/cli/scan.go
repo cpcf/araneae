@@ -55,7 +55,11 @@ func ParseScanArgs(args []string) (scanOptions, error) {
 	fs.BoolVar(&opts.failOnDead, "fail-on-dead", false, "exit non-zero when dead links exist")
 	fs.BoolVar(&opts.failOnNon200, "fail-on-non-200", false, "exit non-zero when non-200 links exist")
 
-	if err := fs.Parse(args); err != nil {
+	orderedArgs, err := interspersePositionals(fs, args)
+	if err != nil {
+		return opts, fmt.Errorf("%s: %w", cmd, err)
+	}
+	if err := fs.Parse(orderedArgs); err != nil {
 		return opts, fmt.Errorf("%s: %w", cmd, err)
 	}
 
