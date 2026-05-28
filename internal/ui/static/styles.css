@@ -9,6 +9,7 @@
   --line-strong: #b9c5d2;
   --accent: #0f766e;
   --accent-dark: #115e59;
+  --row-selected: #e5e7eb;
   --row-hover: #f4f8f7;
 }
 
@@ -200,6 +201,14 @@ body {
 
 .table tbody tr:hover {
   background: var(--row-hover);
+}
+
+.table tbody tr.selected {
+  background: var(--row-selected);
+}
+
+.table tbody tr.selected:hover {
+  background: var(--row-selected);
 }
 
 .url-main {

@@ -31,6 +31,7 @@ const metricOk = document.getElementById("metric-ok");
 
 let reportData = null;
 let fetchesByURL = new Map();
+let selectedLinkURL = "";
 
 const copySupport = Boolean(window.isSecureContext && navigator.clipboard && navigator.clipboard.writeText);
 
@@ -112,6 +113,7 @@ function renderLinks() {
   for (const link of list) {
     const row = document.createElement("tr");
     row.dataset.url = link.url;
+    row.classList.toggle("selected", link.url === selectedLinkURL);
 
     const status = buildStatus(link);
     const sourceCount = Array.isArray(link.sources) ? link.sources.length : 0;
@@ -139,6 +141,8 @@ function renderLinks() {
     `;
 
     row.addEventListener("click", () => {
+      selectedLinkURL = link.url || "";
+      markSelectedLinkRow();
       renderDetail(link);
     });
 
@@ -157,6 +161,12 @@ function renderLinks() {
     });
 
     linksTbody.appendChild(row);
+  }
+}
+
+function markSelectedLinkRow() {
+  for (const row of linksTbody.querySelectorAll("tr")) {
+    row.classList.toggle("selected", row.dataset.url === selectedLinkURL);
   }
 }
 
