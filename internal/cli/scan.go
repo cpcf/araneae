@@ -24,6 +24,7 @@ type scanOptions struct {
 	maxReqPerSec float64
 	allowHosts   []string
 	pathPrefix   string
+	localRoot    string
 	userAgent    string
 	failOnDead   bool
 	failOnNon200 bool
@@ -54,6 +55,7 @@ func ParseScanArgs(args []string) (scanOptions, error) {
 	fs.Float64Var(&opts.maxReqPerSec, "max-requests-per-second", 0, "maximum request starts per second; 0 means unlimited")
 	fs.Var(&allowHosts, "allow-host", "additional exact origins allowed for crawl")
 	fs.StringVar(&opts.pathPrefix, "path-prefix", "", "optional path prefix restriction")
+	fs.StringVar(&opts.localRoot, "local-root", "", "local static site root to seed crawl with every HTML page")
 	fs.StringVar(&opts.userAgent, "user-agent", "araneae/0.1", "user-agent string")
 	fs.BoolVar(&opts.failOnDead, "fail-on-dead", false, "exit non-zero when dead links exist")
 	fs.BoolVar(&opts.failOnNon200, "fail-on-non-200", false, "exit non-zero when non-200 links exist")
@@ -100,6 +102,7 @@ func RunScan(args []string) error {
 		MaxRequestsPerSecond: opts.maxReqPerSec,
 		AllowHosts:           opts.allowHosts,
 		PathPrefix:           opts.pathPrefix,
+		LocalRoot:            opts.localRoot,
 		UserAgent:            opts.userAgent,
 	}
 	reportData, err := crawl.Run(context.Background(), crawler)

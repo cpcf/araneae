@@ -23,6 +23,7 @@ type ScanOptions struct {
 	MaxRequestsPerSecond float64
 	AllowHosts           []string
 	PathPrefix           string
+	LocalRoot            string
 	UserAgent            string
 	Fetcher              Fetcher
 	Parser               Parser
@@ -179,6 +180,26 @@ func (c *Crawler) Run(ctx context.Context) (report.Report, error) {
 		queued[fetchURL] = true
 	}
 
+	addLocalRootSeeds := func() error {
+		if c.opts.LocalRoot == "" {
+			return nil
+		}
+		seeds, err := localRootSeedURLs(scopeOrigin, c.opts.LocalRoot)
+		if err != nil {
+			return err
+		}
+		for _, seed := range seeds {
+			decision, err := scope.Check(seed)
+			if err != nil {
+				return err
+			}
+			if decision.Allowed {
+				addToQueue(seed)
+			}
+		}
+		return nil
+	}
+
 	recordSource := func(dst map[string]*sourceState, pageURL, text string) {
 		st, ok := dst[pageURL]
 		if !ok {
@@ -266,6 +287,9 @@ func (c *Crawler) Run(ctx context.Context) (report.Report, error) {
 
 	visited[entryFetch.URL] = true
 	processFetch(entryFetch)
+	if err := addLocalRootSeeds(); err != nil {
+		return report.Report{}, fmt.Errorf("local root discovery failed: %w", err)
+	}
 
 	startWorkers()
 

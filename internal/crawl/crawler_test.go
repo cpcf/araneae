@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -270,6 +272,75 @@ func TestSequentialCrawlerParsesOnlyHTML(t *testing.T) {
 	}
 }
 
+func TestCrawlerSeedsLocalRootHTMLPages(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "index.html"), "<p>home</p>")
+	writeTestFile(t, filepath.Join(root, "orphan.html"), "<p>orphan</p>")
+	writeTestFile(t, filepath.Join(root, "nested", "index.html"), "<p>nested</p>")
+	writeTestFile(t, filepath.Join(root, "assets", "notes.txt"), "ignored")
+
+	entry := "https://docs.example.test/docs/"
+	orphanURL := "https://docs.example.test/docs/orphan.html"
+	nestedURL := "https://docs.example.test/docs/nested/"
+	brokenURL := "https://docs.example.test/docs/broken"
+	fetcher := newScriptedFetcher(map[string]scriptedFetch{
+		entry: {
+			status:      http.StatusOK,
+			contentType: "text/html; charset=utf-8",
+			body:        `<p>entry has no orphan link</p>`,
+		},
+		orphanURL: {
+			status:      http.StatusOK,
+			contentType: "text/html; charset=utf-8",
+			body:        `<a href="/docs/broken">Broken</a>`,
+		},
+		nestedURL: {
+			status:      http.StatusOK,
+			contentType: "text/html; charset=utf-8",
+			body:        `<p>nested orphan</p>`,
+		},
+		brokenURL: {
+			status:      http.StatusNotFound,
+			contentType: "text/html; charset=utf-8",
+			body:        "missing",
+		},
+	}, 0)
+
+	reportData, err := Run(context.Background(), ScanOptions{
+		EntryURL:    entry,
+		MaxPages:    10,
+		Timeout:     2 * time.Second,
+		UserAgent:   "araneae-test",
+		Concurrency: 2,
+		Fetcher:     fetcher,
+		PathPrefix:  "/docs/",
+		LocalRoot:   root,
+	})
+	if err != nil {
+		t.Fatalf("run scanner: %v", err)
+	}
+
+	if findFetchByURL(reportData, orphanURL) == nil {
+		t.Fatalf("orphan HTML page was not fetched")
+	}
+	if findFetchByURL(reportData, nestedURL) == nil {
+		t.Fatalf("nested index HTML page was not fetched")
+	}
+	if findFetchByURL(reportData, "https://docs.example.test/docs/assets/notes.txt") != nil {
+		t.Fatalf("non-HTML local file was fetched")
+	}
+	broken := findLinkByURL(reportData, brokenURL)
+	if broken == nil {
+		t.Fatalf("link from orphan page was not discovered")
+	}
+	if !broken.Dead || broken.Problem != "http_status" {
+		t.Fatalf("broken link health = dead:%v problem:%q; want dead http_status", broken.Dead, broken.Problem)
+	}
+	if len(broken.Sources) != 1 || broken.Sources[0].PageURL != orphanURL {
+		t.Fatalf("broken link sources = %#v; want orphan source", broken.Sources)
+	}
+}
+
 func TestCrawlerConcurrentFetches(t *testing.T) {
 	entry := "https://docs.example.test/"
 	fetcher := newScriptedFetcher(map[string]scriptedFetch{
@@ -479,6 +550,16 @@ func runScanWithFetcher(t *testing.T, entry string, maxPages int, concurrency in
 		t.Fatalf("run scanner: %v", err)
 	}
 	return result
+}
+
+func writeTestFile(t *testing.T, path string, contents string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create test dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
 }
 
 type scriptedFetch struct {

@@ -13,6 +13,7 @@ Araneae:
 - Crawls only links in the entry URL origin by default.
 - Accepts additional exact origins with `--allow-host`.
 - Optionally restricts crawling to a path prefix with `--path-prefix`.
+- Can seed a local docs build with `--local-root` so orphaned HTML pages are checked.
 - Counts duplicate link occurrences.
 - Fetches each normalized target URL once, even if multiple fragment links point to it.
 - Reports dead links, missing fragments, and non-200 HTTP responses.
@@ -106,6 +107,7 @@ Important flags:
 - `--max-requests-per-second 0`: maximum request starts per second across all workers. `0` means unlimited.
 - `--allow-host https://www.example.com`: additional exact origin that is safe to crawl. Can be repeated.
 - `--path-prefix /docs/`: optional normalized path prefix that same-scope links must match.
+- `--local-root public`: local static site root to seed the crawl with every `.html`/`.htm` page.
 - `--user-agent "araneae/0.1"`: HTTP user agent.
 - `--fail-on-dead`: exit non-zero after writing the report if dead links are found.
 - `--fail-on-non-200`: exit non-zero after writing the report if any non-200 links are found.
@@ -133,6 +135,16 @@ Limit crawling to a docs subtree:
 araneae scan https://example.com/docs/ \
   --path-prefix /docs/
 ```
+
+Check a local docs build for orphaned pages:
+
+```sh
+araneae scan http://localhost:8000/docs/ \
+  --local-root public/docs \
+  --path-prefix /docs/
+```
+
+`--local-root` treats the directory as being served at the entry URL path. It maps `index.html` to the directory URL, for example `guide/index.html` becomes `/docs/guide/`.
 
 Use in CI:
 

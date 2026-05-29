@@ -15,6 +15,7 @@ func TestParseScanArgsAcceptsFlagsAfterEntryURL(t *testing.T) {
 		"--max-requests-per-second", "4.5",
 		"--allow-host", "https://www.example.com",
 		"--path-prefix", "/docs/",
+		"--local-root", "public",
 		"--user-agent", "custom-agent",
 		"--fail-on-dead",
 		"--fail-on-non-200",
@@ -46,6 +47,9 @@ func TestParseScanArgsAcceptsFlagsAfterEntryURL(t *testing.T) {
 	}
 	if opts.pathPrefix != "/docs/" {
 		t.Fatalf("pathPrefix = %q", opts.pathPrefix)
+	}
+	if opts.localRoot != "public" {
+		t.Fatalf("localRoot = %q", opts.localRoot)
 	}
 	if opts.userAgent != "custom-agent" {
 		t.Fatalf("userAgent = %q", opts.userAgent)
