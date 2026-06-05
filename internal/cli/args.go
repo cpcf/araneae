@@ -83,10 +83,10 @@ func inlineFlagValue(arg string) string {
 
 func followsHeaderValue(args []string, index int) bool {
 	if index >= 2 && flagName(args[index-2]) == "header" {
-		return strings.HasSuffix(strings.TrimSpace(args[index-1]), ":")
+		return hasEmptyHeaderValue(args[index-1])
 	}
 	if index >= 1 && looksLikeFlag(args[index-1]) && flagName(args[index-1]) == "header" && strings.Contains(args[index-1], "=") {
-		return strings.HasSuffix(strings.TrimSpace(inlineFlagValue(args[index-1])), ":")
+		return hasEmptyHeaderValue(inlineFlagValue(args[index-1]))
 	}
 	return false
 }
@@ -121,7 +121,10 @@ func looksLikeSplitHeaderValue(fs *flag.FlagSet, value string, args []string, ne
 	if next >= len(args) {
 		return false
 	}
-	if !strings.HasSuffix(strings.TrimSpace(value), ":") {
+	if !hasEmptyHeaderValue(value) {
+		return false
+	}
+	if args[next] == "--" {
 		return false
 	}
 	if looksLikeFlag(args[next]) {
@@ -144,4 +147,9 @@ func looksLikeSplitHeaderValue(fs *flag.FlagSet, value string, args []string, ne
 
 func looksLikeAbsoluteURL(arg string) bool {
 	return strings.HasPrefix(arg, "http://") || strings.HasPrefix(arg, "https://")
+}
+
+func hasEmptyHeaderValue(arg string) bool {
+	_, value, ok := strings.Cut(arg, ":")
+	return ok && strings.TrimSpace(value) == ""
 }

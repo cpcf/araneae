@@ -286,6 +286,22 @@ func TestParseScanArgsReportsUnknownFlagAfterValidHeader(t *testing.T) {
 				"--bad",
 			},
 		},
+		{
+			name: "separate colon-ending value",
+			args: []string{
+				"https://docs.example.com/",
+				"--header", "X-Test:ok:",
+				"--bad",
+			},
+		},
+		{
+			name: "inline colon-ending value",
+			args: []string{
+				"https://docs.example.com/",
+				"--header=X-Test:ok:",
+				"--bad",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -306,8 +322,9 @@ func TestParseScanArgsReportsUnknownFlagAfterValidHeader(t *testing.T) {
 
 func TestParseScanArgsAcceptsEmptyHeaderAroundEntryURL(t *testing.T) {
 	tests := []struct {
-		name string
-		args []string
+		name         string
+		args         []string
+		wantMaxPages int
 	}{
 		{
 			name: "before entry URL",
@@ -316,6 +333,7 @@ func TestParseScanArgsAcceptsEmptyHeaderAroundEntryURL(t *testing.T) {
 				"https://docs.example.com/",
 				"--max-pages", "2",
 			},
+			wantMaxPages: 2,
 		},
 		{
 			name: "after entry URL",
@@ -324,6 +342,25 @@ func TestParseScanArgsAcceptsEmptyHeaderAroundEntryURL(t *testing.T) {
 				"--header", "X-Empty:",
 				"--max-pages", "2",
 			},
+			wantMaxPages: 2,
+		},
+		{
+			name: "before delimiter",
+			args: []string{
+				"--header", "X-Empty:",
+				"--",
+				"https://docs.example.com/",
+			},
+			wantMaxPages: 500,
+		},
+		{
+			name: "inline before delimiter",
+			args: []string{
+				"--header=X-Empty:",
+				"--",
+				"https://docs.example.com/",
+			},
+			wantMaxPages: 500,
 		},
 	}
 
@@ -343,7 +380,7 @@ func TestParseScanArgsAcceptsEmptyHeaderAroundEntryURL(t *testing.T) {
 			if opts.entryURL != "https://docs.example.com/" {
 				t.Fatalf("entryURL = %q", opts.entryURL)
 			}
-			if opts.maxPages != 2 {
+			if opts.maxPages != tt.wantMaxPages {
 				t.Fatalf("maxPages = %d", opts.maxPages)
 			}
 		})
