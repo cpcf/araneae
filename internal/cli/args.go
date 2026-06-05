@@ -53,7 +53,7 @@ func interspersePositionals(fs *flag.FlagSet, args []string) ([]string, error) {
 		if i+1 >= len(args) {
 			continue
 		}
-		if name == "header" && looksLikeSplitHeaderValue(args[i+1], args, i+2) {
+		if name == "header" && looksLikeSplitHeaderValue(args[i+1], args, i+2, len(positionals) > 0) {
 			return nil, fmt.Errorf("--header value looks split; quote the full header value")
 		}
 		i++
@@ -83,9 +83,30 @@ func followsHeaderValue(args []string, index int) bool {
 	return false
 }
 
-func looksLikeSplitHeaderValue(value string, args []string, next int) bool {
+func looksLikeSplitHeaderValue(value string, args []string, next int, havePositionals bool) bool {
 	if next >= len(args) {
 		return false
 	}
-	return strings.HasSuffix(strings.TrimSpace(value), ":") && looksLikeFlag(args[next])
+	if !strings.HasSuffix(strings.TrimSpace(value), ":") {
+		return false
+	}
+	if looksLikeFlag(args[next]) {
+		return true
+	}
+	if havePositionals {
+		return true
+	}
+	if looksLikeAbsoluteURL(args[next]) {
+		return false
+	}
+	for _, arg := range args[next+1:] {
+		if looksLikeFlag(arg) {
+			return true
+		}
+	}
+	return false
+}
+
+func looksLikeAbsoluteURL(arg string) bool {
+	return strings.HasPrefix(arg, "http://") || strings.HasPrefix(arg, "https://")
 }

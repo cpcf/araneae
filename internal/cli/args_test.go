@@ -197,6 +197,14 @@ func TestParseScanArgsRejectsSplitHeaderWithoutLeakingValue(t *testing.T) {
 				"--header", "Authorization:", "demo-token",
 			},
 		},
+		{
+			name:   "multi-token value before defined flag",
+			secret: "super-secret-timeout",
+			args: []string{
+				"https://docs.example.com/",
+				"--header", "Authorization:", "Bearer", "--timeout=super-secret-timeout",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -209,6 +217,30 @@ func TestParseScanArgsRejectsSplitHeaderWithoutLeakingValue(t *testing.T) {
 				t.Fatalf("error %q leaks split header value", err)
 			}
 		})
+	}
+}
+
+func TestParseScanArgsAcceptsEmptyHeaderBeforeEntryURL(t *testing.T) {
+	opts, err := ParseScanArgs([]string{
+		"--header", "X-Empty:",
+		"https://docs.example.com/",
+		"--max-pages", "2",
+	})
+	if err != nil {
+		t.Fatalf("ParseScanArgs() error = %v", err)
+	}
+
+	if len(opts.headers) != 1 {
+		t.Fatalf("headers = %#v; want 1", opts.headers)
+	}
+	if opts.headers[0] != (requestHeader{Name: "X-Empty", Value: ""}) {
+		t.Fatalf("header = %#v", opts.headers[0])
+	}
+	if opts.entryURL != "https://docs.example.com/" {
+		t.Fatalf("entryURL = %q", opts.entryURL)
+	}
+	if opts.maxPages != 2 {
+		t.Fatalf("maxPages = %d", opts.maxPages)
 	}
 }
 
