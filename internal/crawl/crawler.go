@@ -70,7 +70,7 @@ func Run(ctx context.Context, opts ScanOptions) (report.Report, error) {
 func NewCrawler(opts ScanOptions) *Crawler {
 	fetcher := opts.Fetcher
 	if fetcher == nil {
-		fetcher = NewHTTPFetcher(opts.Timeout, opts.UserAgent, opts.MaxResponseBytes, opts.Headers)
+		fetcher = NewHTTPFetcher(opts.Timeout, opts.UserAgent, opts.MaxResponseBytes, opts.Headers, opts.EntryURL)
 	}
 	parser := opts.Parser
 	if parser == nil {

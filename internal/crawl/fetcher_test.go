@@ -242,7 +242,7 @@ func TestHTTPFetcherKeepsConfiguredHeadersOnSameOriginRedirect(t *testing.T) {
 		{Name: "Authorization", Value: "Bearer same-origin"},
 		{Name: "X-Preview-Token", Value: "same-origin"},
 		{Name: "User-Agent", Value: "header-agent"},
-	})
+	}, server.URL)
 	result, err := fetcher.Fetch(context.Background(), server.URL+"/start")
 	if err != nil {
 		t.Fatalf("Fetch() error = %v", err)
@@ -282,7 +282,7 @@ func TestHTTPFetcherDropsConfiguredHeadersOnCrossOriginRedirect(t *testing.T) {
 		{Name: "Authorization", Value: "Bearer cross-origin"},
 		{Name: "X-Preview-Token", Value: "cross-origin"},
 		{Name: "User-Agent", Value: "header-agent"},
-	})
+	}, start.URL)
 	result, err := fetcher.Fetch(context.Background(), start.URL+"/start")
 	if err != nil {
 		t.Fatalf("Fetch() error = %v", err)

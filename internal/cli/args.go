@@ -37,6 +37,9 @@ func interspersePositionals(fs *flag.FlagSet, args []string) ([]string, error) {
 
 		defined := fs.Lookup(name)
 		if defined == nil {
+			if followsHeaderValue(args, i) {
+				return nil, fmt.Errorf("flag provided but not defined after --header; quote the full header value")
+			}
 			return nil, fmt.Errorf("flag provided but not defined: -%s", name)
 		}
 
@@ -65,4 +68,14 @@ func flagName(arg string) string {
 	trimmed := strings.TrimLeft(arg, "-")
 	name, _, _ := strings.Cut(trimmed, "=")
 	return name
+}
+
+func followsHeaderValue(args []string, index int) bool {
+	if index >= 2 && flagName(args[index-2]) == "header" {
+		return true
+	}
+	if index >= 1 && looksLikeFlag(args[index-1]) && flagName(args[index-1]) == "header" && strings.Contains(args[index-1], "=") {
+		return true
+	}
+	return false
 }

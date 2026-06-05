@@ -150,7 +150,7 @@ araneae scan https://preview.example.com/docs/ \
   --header "Cookie: preview_session=$DOCS_PREVIEW_COOKIE"
 ```
 
-Quote the whole header argument so the shell passes the colon and spaces as one value. In CI, store token and cookie values in the platform's secret store and expand them through environment variables. Configured request header names and values are not written to the JSON report. Headers are sent on same-origin redirects, but Araneae removes configured headers before following a cross-origin redirect. If `User-Agent` is provided with `--header`, the `--user-agent` flag value wins.
+Quote the whole header argument so the shell passes the colon and spaces as one value. In CI, store token and cookie values in the platform's secret store and expand them through environment variables. Configured request header names and values are not written to the JSON report. Headers are sent only to the entry URL origin and same-origin redirects. They are not sent to `--allow-host` origins or cross-origin redirect targets. If `User-Agent` is provided with `--header`, the `--user-agent` flag value wins.
 
 Limit crawling to a docs subtree:
 

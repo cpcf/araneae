@@ -312,6 +312,97 @@ func TestCrawlerReportDoesNotIncludeRequestHeaders(t *testing.T) {
 	}
 }
 
+func TestCrawlerDoesNotSendHeadersAfterCrossOriginEntryRedirect(t *testing.T) {
+	var targetHeaderLeaks int32
+	var sawFollowup atomic.Bool
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" || r.Header.Get("Cookie") != "" {
+			atomic.AddInt32(&targetHeaderLeaks, 1)
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		switch r.URL.Path {
+		case "/final":
+			_, _ = w.Write([]byte(`<a href="/next">Next</a>`))
+		case "/next":
+			sawFollowup.Store(true)
+			_, _ = w.Write([]byte("<p>next</p>"))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer target.Close()
+
+	entry := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"/final", http.StatusFound)
+	}))
+	defer entry.Close()
+
+	_, err := Run(context.Background(), ScanOptions{
+		EntryURL:    entry.URL + "/",
+		MaxPages:    3,
+		Timeout:     2 * time.Second,
+		UserAgent:   "araneae-test",
+		Concurrency: 1,
+		Headers: []RequestHeader{
+			{Name: "Authorization", Value: "Bearer entry-secret"},
+			{Name: "Cookie", Value: "preview_session=entry-secret"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("run scanner: %v", err)
+	}
+	if !sawFollowup.Load() {
+		t.Fatal("follow-up page was not fetched")
+	}
+	if got := atomic.LoadInt32(&targetHeaderLeaks); got != 0 {
+		t.Fatalf("cross-origin target received configured headers %d times; want 0", got)
+	}
+}
+
+func TestCrawlerDoesNotSendHeadersToAllowHost(t *testing.T) {
+	var sawEntryHeader atomic.Bool
+	var allowedHeaderLeaks int32
+	allowed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" || r.Header.Get("Cookie") != "" {
+			atomic.AddInt32(&allowedHeaderLeaks, 1)
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte("<p>allowed</p>"))
+	}))
+	defer allowed.Close()
+
+	entry := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer entry-secret" {
+			sawEntryHeader.Store(true)
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<a href="` + allowed.URL + `/allowed">Allowed</a>`))
+	}))
+	defer entry.Close()
+
+	_, err := Run(context.Background(), ScanOptions{
+		EntryURL:    entry.URL + "/",
+		MaxPages:    2,
+		Timeout:     2 * time.Second,
+		UserAgent:   "araneae-test",
+		Concurrency: 1,
+		AllowHosts:  []string{allowed.URL},
+		Headers: []RequestHeader{
+			{Name: "Authorization", Value: "Bearer entry-secret"},
+			{Name: "Cookie", Value: "preview_session=entry-secret"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("run scanner: %v", err)
+	}
+	if !sawEntryHeader.Load() {
+		t.Fatal("entry origin did not receive configured Authorization header")
+	}
+	if got := atomic.LoadInt32(&allowedHeaderLeaks); got != 0 {
+		t.Fatalf("allow-host received configured headers %d times; want 0", got)
+	}
+}
+
 func TestCrawlerDoesNotRetryNotFound(t *testing.T) {
 	var notFoundAttempts int32
 	var sleepCalls int32

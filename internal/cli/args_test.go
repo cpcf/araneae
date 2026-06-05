@@ -168,6 +168,20 @@ func TestParseScanArgsRejectsMalformedHeader(t *testing.T) {
 	}
 }
 
+func TestParseScanArgsRejectsSplitHeaderWithoutLeakingValue(t *testing.T) {
+	secret := "fake-secret-token"
+	_, err := ParseScanArgs([]string{
+		"https://docs.example.com/",
+		"--header", "Authorization:", "--" + secret,
+	})
+	if err == nil {
+		t.Fatal("ParseScanArgs() error = nil; want error")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("error %q leaks split header value", err)
+	}
+}
+
 func TestParseScanArgsRejectsEmptyHeaderName(t *testing.T) {
 	_, err := ParseScanArgs([]string{
 		"https://docs.example.com/",

@@ -40,6 +40,7 @@ type HTTPFetcher struct {
 	userAgent        string
 	maxResponseBytes int64
 	headers          []RequestHeader
+	headerOrigin     *url.URL
 	now              func() time.Time
 }
 
@@ -47,11 +48,12 @@ var errTooManyRedirects = errors.New("too many redirects")
 
 const problemResponseTooLarge = "response_too_large"
 
-func NewHTTPFetcher(timeout time.Duration, userAgent string, maxResponseBytes int64, headers []RequestHeader) *HTTPFetcher {
+func NewHTTPFetcher(timeout time.Duration, userAgent string, maxResponseBytes int64, headers []RequestHeader, headerOrigin string) *HTTPFetcher {
 	return &HTTPFetcher{
 		userAgent:        userAgent,
 		maxResponseBytes: maxResponseBytes,
 		headers:          append([]RequestHeader{}, headers...),
+		headerOrigin:     parseHeaderOrigin(headerOrigin),
 		client: &http.Client{
 			Timeout: timeout,
 		},
@@ -79,9 +81,7 @@ func (f *HTTPFetcher) Fetch(ctx context.Context, fetchURL string) (FetchResult, 
 		result.Error = "network_error"
 		return finish(), nil
 	}
-	for _, header := range f.headers {
-		request.Header.Add(header.Name, header.Value)
-	}
+	f.addConfiguredHeaders(request)
 	request.Header.Set("User-Agent", f.userAgent)
 
 	redirects := []string{}
@@ -122,6 +122,27 @@ func (f *HTTPFetcher) Fetch(ctx context.Context, fetchURL string) (FetchResult, 
 	}
 	result.Body = body
 	return finish(), nil
+}
+
+func parseHeaderOrigin(raw string) *url.URL {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return nil
+	}
+	normalized := normalizeURL(parsed)
+	if normalized.Scheme != "http" && normalized.Scheme != "https" || normalized.Host == "" {
+		return nil
+	}
+	return normalized
+}
+
+func (f *HTTPFetcher) addConfiguredHeaders(req *http.Request) {
+	if f.headerOrigin == nil || !sameOrigin(req.URL, f.headerOrigin) {
+		return
+	}
+	for _, header := range f.headers {
+		req.Header.Add(header.Name, header.Value)
+	}
 }
 
 func (f *HTTPFetcher) dropConfiguredHeadersOnCrossOriginRedirect(req *http.Request, via []*http.Request) {
