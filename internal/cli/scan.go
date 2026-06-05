@@ -45,10 +45,7 @@ func (s *stringSliceValue) Set(v string) error {
 	return nil
 }
 
-type requestHeader struct {
-	Name  string
-	Value string
-}
+type requestHeader = crawl.RequestHeader
 
 type headerValue []requestHeader
 
@@ -167,6 +164,7 @@ func RunScan(args []string) error {
 		MaxResponseBytes:     opts.maxResponseBytes,
 		Retries:              opts.retries,
 		RetryBackoff:         opts.retryBackoff,
+		Headers:              opts.headers,
 		AllowHosts:           opts.allowHosts,
 		PathPrefix:           opts.pathPrefix,
 		LocalRoot:            opts.localRoot,

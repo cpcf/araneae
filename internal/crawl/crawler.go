@@ -24,6 +24,7 @@ type ScanOptions struct {
 	MaxResponseBytes     int64
 	Retries              int
 	RetryBackoff         time.Duration
+	Headers              []RequestHeader
 	AllowHosts           []string
 	PathPrefix           string
 	LocalRoot            string
@@ -69,7 +70,7 @@ func Run(ctx context.Context, opts ScanOptions) (report.Report, error) {
 func NewCrawler(opts ScanOptions) *Crawler {
 	fetcher := opts.Fetcher
 	if fetcher == nil {
-		fetcher = NewHTTPFetcher(opts.Timeout, opts.UserAgent, opts.MaxResponseBytes)
+		fetcher = NewHTTPFetcher(opts.Timeout, opts.UserAgent, opts.MaxResponseBytes, opts.Headers)
 	}
 	parser := opts.Parser
 	if parser == nil {

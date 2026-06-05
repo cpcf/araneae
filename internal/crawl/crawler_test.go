@@ -230,6 +230,45 @@ func TestCrawlerRetriesTransientStatusThenReportsFinalOK(t *testing.T) {
 	}
 }
 
+func TestCrawlerSendsConfiguredRequestHeaders(t *testing.T) {
+	var sawRequest atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawRequest.Store(true)
+		if got := r.Header.Get("Authorization"); got != "Bearer secret-token" {
+			t.Errorf("Authorization = %q; want Bearer secret-token", got)
+		}
+		if got := r.Header.Values("X-Preview"); len(got) != 2 || got[0] != "one" || got[1] != "two" {
+			t.Errorf("X-Preview values = %#v; want [one two]", got)
+		}
+		if got := r.UserAgent(); got != "flag-agent" {
+			t.Errorf("User-Agent = %q; want flag-agent", got)
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte("<p>ok</p>"))
+	}))
+	defer server.Close()
+
+	_, err := Run(context.Background(), ScanOptions{
+		EntryURL:    server.URL + "/",
+		MaxPages:    1,
+		Timeout:     2 * time.Second,
+		UserAgent:   "flag-agent",
+		Concurrency: 1,
+		Headers: []RequestHeader{
+			{Name: "Authorization", Value: "Bearer secret-token"},
+			{Name: "X-Preview", Value: "one"},
+			{Name: "X-Preview", Value: "two"},
+			{Name: "User-Agent", Value: "header-agent"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("run scanner: %v", err)
+	}
+	if !sawRequest.Load() {
+		t.Fatal("server did not receive request")
+	}
+}
+
 func TestCrawlerDoesNotRetryNotFound(t *testing.T) {
 	var notFoundAttempts int32
 	var sleepCalls int32

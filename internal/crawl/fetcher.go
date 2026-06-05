@@ -30,10 +30,16 @@ type Fetcher interface {
 	Fetch(ctx context.Context, url string) (FetchResult, error)
 }
 
+type RequestHeader struct {
+	Name  string
+	Value string
+}
+
 type HTTPFetcher struct {
 	client           *http.Client
 	userAgent        string
 	maxResponseBytes int64
+	headers          []RequestHeader
 	now              func() time.Time
 }
 
@@ -41,10 +47,11 @@ var errTooManyRedirects = errors.New("too many redirects")
 
 const problemResponseTooLarge = "response_too_large"
 
-func NewHTTPFetcher(timeout time.Duration, userAgent string, maxResponseBytes int64) *HTTPFetcher {
+func NewHTTPFetcher(timeout time.Duration, userAgent string, maxResponseBytes int64, headers []RequestHeader) *HTTPFetcher {
 	return &HTTPFetcher{
 		userAgent:        userAgent,
 		maxResponseBytes: maxResponseBytes,
+		headers:          append([]RequestHeader{}, headers...),
 		client: &http.Client{
 			Timeout: timeout,
 		},
@@ -71,6 +78,9 @@ func (f *HTTPFetcher) Fetch(ctx context.Context, fetchURL string) (FetchResult, 
 	if err != nil {
 		result.Error = "network_error"
 		return finish(), nil
+	}
+	for _, header := range f.headers {
+		request.Header.Add(header.Name, header.Value)
 	}
 	request.Header.Set("User-Agent", f.userAgent)
 
