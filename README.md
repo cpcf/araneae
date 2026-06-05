@@ -106,7 +106,7 @@ Important flags:
 - `--concurrency 8`: number of concurrent fetch workers.
 - `--max-requests-per-second 0`: maximum request starts per second across all workers. `0` means unlimited.
 - `--max-response-bytes 5242880`: maximum HTML response body bytes to read. `0` means unlimited.
-- `--retries 0`: retry count for transient fetch failures. `0` disables retries.
+- `--retries 0`: retry count for transient fetch failures, from `0` to `100`. `0` disables retries.
 - `--retry-backoff 500ms`: delay between retry attempts.
 - `--allow-host https://www.example.com`: additional exact origin that is safe to crawl. Can be repeated.
 - `--path-prefix /docs/`: optional normalized path prefix that same-scope links must match.

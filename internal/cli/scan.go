@@ -47,6 +47,7 @@ func (s *stringSliceValue) Set(v string) error {
 func ParseScanArgs(args []string) (scanOptions, error) {
 	const cmd = "scan"
 	const defaultMaxResponseBytes int64 = 5 * 1024 * 1024
+	const maxRetries = 100
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
@@ -96,6 +97,9 @@ func ParseScanArgs(args []string) (scanOptions, error) {
 	}
 	if opts.retries < 0 {
 		return opts, fmt.Errorf("%s: --retries must be >= 0", cmd)
+	}
+	if opts.retries > maxRetries {
+		return opts, fmt.Errorf("%s: --retries must be <= %d", cmd, maxRetries)
 	}
 	if opts.retryBackoff < 0 {
 		return opts, fmt.Errorf("%s: --retry-backoff must be >= 0", cmd)

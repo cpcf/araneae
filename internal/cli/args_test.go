@@ -122,6 +122,16 @@ func TestParseScanArgsRejectsNegativeRetries(t *testing.T) {
 	}
 }
 
+func TestParseScanArgsRejectsTooManyRetries(t *testing.T) {
+	_, err := ParseScanArgs([]string{
+		"https://docs.example.com/",
+		"--retries", "101",
+	})
+	if err == nil {
+		t.Fatal("ParseScanArgs() error = nil; want error")
+	}
+}
+
 func TestParseScanArgsRejectsNegativeRetryBackoff(t *testing.T) {
 	_, err := ParseScanArgs([]string{
 		"https://docs.example.com/",

@@ -2,6 +2,7 @@ package crawl
 
 import (
 	"context"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -368,6 +369,42 @@ func TestCrawlerStopsZeroBackoffRetriesWhenContextCanceled(t *testing.T) {
 	}
 	if got := fetcher.requestCount(); got != 1 {
 		t.Fatalf("fetch attempts = %d; want 1", got)
+	}
+}
+
+func TestCrawlerMaxIntRetriesDoesNotOverflowBeforeFirstAttempt(t *testing.T) {
+	entry := "https://docs.example.test/"
+	fetcher := newSequencedFetcher(map[string][]FetchResult{
+		entry: {
+			{
+				URL:         entry,
+				StatusCode:  http.StatusOK,
+				FinalURL:    entry,
+				ContentType: "text/html; charset=utf-8",
+				Body:        []byte("<p>ok</p>"),
+				CheckedAt:   time.Now().UTC(),
+			},
+		},
+	})
+
+	reportData, err := Run(context.Background(), ScanOptions{
+		EntryURL:     entry,
+		MaxPages:     1,
+		Timeout:      2 * time.Second,
+		UserAgent:    "araneae-test",
+		Concurrency:  1,
+		Fetcher:      fetcher,
+		Retries:      math.MaxInt,
+		RetryBackoff: 0,
+	})
+	if err != nil {
+		t.Fatalf("run scanner: %v", err)
+	}
+	if got := fetcher.requestCount(entry); got != 1 {
+		t.Fatalf("entry attempts = %d; want 1", got)
+	}
+	if reportData.Summary.FetchesAttempted != 1 {
+		t.Fatalf("fetches attempted = %d; want 1", reportData.Summary.FetchesAttempted)
 	}
 }
 
