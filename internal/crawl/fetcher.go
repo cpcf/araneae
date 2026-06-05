@@ -91,6 +91,7 @@ func (f *HTTPFetcher) Fetch(ctx context.Context, fetchURL string) (FetchResult, 
 		if len(via) >= 10 {
 			return errTooManyRedirects
 		}
+		f.dropConfiguredHeadersOnCrossOriginRedirect(req, via)
 		return nil
 	}
 
@@ -121,6 +122,16 @@ func (f *HTTPFetcher) Fetch(ctx context.Context, fetchURL string) (FetchResult, 
 	}
 	result.Body = body
 	return finish(), nil
+}
+
+func (f *HTTPFetcher) dropConfiguredHeadersOnCrossOriginRedirect(req *http.Request, via []*http.Request) {
+	if len(via) == 0 || sameOrigin(req.URL, via[0].URL) {
+		return
+	}
+	for _, header := range f.headers {
+		req.Header.Del(header.Name)
+	}
+	req.Header.Set("User-Agent", f.userAgent)
 }
 
 func (f *HTTPFetcher) nowUTC() time.Time {

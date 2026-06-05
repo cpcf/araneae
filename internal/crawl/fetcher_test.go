@@ -6,7 +6,9 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -208,6 +210,88 @@ func TestReadResponseBodyAllowsMaxInt64Limit(t *testing.T) {
 	}
 	if string(body) != "<p>ok</p>" {
 		t.Fatalf("body = %q; want <p>ok</p>", string(body))
+	}
+}
+
+func TestHTTPFetcherKeepsConfiguredHeadersOnSameOriginRedirect(t *testing.T) {
+	var sawFinal atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/start":
+			http.Redirect(w, r, "/final", http.StatusFound)
+		case "/final":
+			sawFinal.Store(true)
+			if got := r.Header.Get("Authorization"); got != "Bearer same-origin" {
+				t.Errorf("Authorization = %q; want Bearer same-origin", got)
+			}
+			if got := r.Header.Get("X-Preview-Token"); got != "same-origin" {
+				t.Errorf("X-Preview-Token = %q; want same-origin", got)
+			}
+			if got := r.UserAgent(); got != "flag-agent" {
+				t.Errorf("User-Agent = %q; want flag-agent", got)
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte("<p>ok</p>"))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	fetcher := NewHTTPFetcher(2*time.Second, "flag-agent", 1024, []RequestHeader{
+		{Name: "Authorization", Value: "Bearer same-origin"},
+		{Name: "X-Preview-Token", Value: "same-origin"},
+		{Name: "User-Agent", Value: "header-agent"},
+	})
+	result, err := fetcher.Fetch(context.Background(), server.URL+"/start")
+	if err != nil {
+		t.Fatalf("Fetch() error = %v", err)
+	}
+	if result.Error != "" || result.StatusCode != http.StatusOK {
+		t.Fatalf("result status/error = %d/%q; want 200/empty", result.StatusCode, result.Error)
+	}
+	if !sawFinal.Load() {
+		t.Fatal("final redirect target was not requested")
+	}
+}
+
+func TestHTTPFetcherDropsConfiguredHeadersOnCrossOriginRedirect(t *testing.T) {
+	var sawTarget atomic.Bool
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawTarget.Store(true)
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Errorf("Authorization = %q; want empty", got)
+		}
+		if got := r.Header.Get("X-Preview-Token"); got != "" {
+			t.Errorf("X-Preview-Token = %q; want empty", got)
+		}
+		if got := r.UserAgent(); got != "flag-agent" {
+			t.Errorf("User-Agent = %q; want flag-agent", got)
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte("<p>ok</p>"))
+	}))
+	defer target.Close()
+
+	start := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"/final", http.StatusFound)
+	}))
+	defer start.Close()
+
+	fetcher := NewHTTPFetcher(2*time.Second, "flag-agent", 1024, []RequestHeader{
+		{Name: "Authorization", Value: "Bearer cross-origin"},
+		{Name: "X-Preview-Token", Value: "cross-origin"},
+		{Name: "User-Agent", Value: "header-agent"},
+	})
+	result, err := fetcher.Fetch(context.Background(), start.URL+"/start")
+	if err != nil {
+		t.Fatalf("Fetch() error = %v", err)
+	}
+	if result.Error != "" || result.StatusCode != http.StatusOK {
+		t.Fatalf("result status/error = %d/%q; want 200/empty", result.StatusCode, result.Error)
+	}
+	if !sawTarget.Load() {
+		t.Fatal("cross-origin redirect target was not requested")
 	}
 }
 
