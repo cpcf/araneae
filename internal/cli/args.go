@@ -45,7 +45,7 @@ func interspersePositionals(fs *flag.FlagSet, args []string) ([]string, error) {
 
 		flags = append(flags, arg)
 		if strings.Contains(arg, "=") {
-			if name == "header" && looksLikeSplitHeaderValue(inlineFlagValue(arg), args, i+1, len(positionals) > 0) {
+			if name == "header" && looksLikeSplitHeaderValue(fs, inlineFlagValue(arg), args, i+1, len(positionals) > 0) {
 				return nil, fmt.Errorf("--header value looks split; quote the full header value")
 			}
 			continue
@@ -56,7 +56,7 @@ func interspersePositionals(fs *flag.FlagSet, args []string) ([]string, error) {
 		if i+1 >= len(args) {
 			continue
 		}
-		if name == "header" && looksLikeSplitHeaderValue(args[i+1], args, i+2, len(positionals) > 0) {
+		if name == "header" && looksLikeSplitHeaderValue(fs, args[i+1], args, i+2, len(positionals) > 0) {
 			return nil, fmt.Errorf("--header value looks split; quote the full header value")
 		}
 		i++
@@ -91,7 +91,33 @@ func followsHeaderValue(args []string, index int) bool {
 	return false
 }
 
-func looksLikeSplitHeaderValue(value string, args []string, next int, havePositionals bool) bool {
+func sanitizeFlagParseError(err error) error {
+	if err == nil || err == flag.ErrHelp {
+		return err
+	}
+	message := err.Error()
+	if strings.HasPrefix(message, "invalid value ") {
+		return sanitizedInvalidFlagValue(message, " for flag -")
+	}
+	if strings.HasPrefix(message, "invalid boolean value ") {
+		return sanitizedInvalidFlagValue(message, " for -")
+	}
+	return err
+}
+
+func sanitizedInvalidFlagValue(message, marker string) error {
+	_, rest, ok := strings.Cut(message, marker)
+	if !ok {
+		return fmt.Errorf("invalid flag value")
+	}
+	name, _, _ := strings.Cut(rest, ":")
+	if name == "" {
+		return fmt.Errorf("invalid flag value")
+	}
+	return fmt.Errorf("invalid value for flag -%s", name)
+}
+
+func looksLikeSplitHeaderValue(fs *flag.FlagSet, value string, args []string, next int, havePositionals bool) bool {
 	if next >= len(args) {
 		return false
 	}
@@ -99,7 +125,8 @@ func looksLikeSplitHeaderValue(value string, args []string, next int, havePositi
 		return false
 	}
 	if looksLikeFlag(args[next]) {
-		return true
+		nextName := flagName(args[next])
+		return nextName != "h" && nextName != "help" && fs.Lookup(nextName) == nil
 	}
 	if havePositionals {
 		return true

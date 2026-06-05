@@ -30,7 +30,7 @@ func ParseServeArgs(args []string) (serveOptions, error) {
 		return opts, fmt.Errorf("%s: %w", cmd, err)
 	}
 	if err := fs.Parse(orderedArgs); err != nil {
-		return opts, fmt.Errorf("%s: %w", cmd, err)
+		return opts, fmt.Errorf("%s: %w", cmd, sanitizeFlagParseError(err))
 	}
 	if fs.NArg() != 1 {
 		return opts, fmt.Errorf("%s: expected <report-path>", cmd)

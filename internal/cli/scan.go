@@ -148,7 +148,7 @@ func ParseScanArgs(args []string) (scanOptions, error) {
 		return opts, fmt.Errorf("%s: %w", cmd, err)
 	}
 	if err := fs.Parse(orderedArgs); err != nil {
-		return opts, fmt.Errorf("%s: %w", cmd, err)
+		return opts, fmt.Errorf("%s: %w", cmd, sanitizeFlagParseError(err))
 	}
 
 	opts.allowHosts = append(opts.allowHosts, allowHosts...)

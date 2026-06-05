@@ -168,6 +168,43 @@ func TestParseScanArgsRejectsMalformedHeader(t *testing.T) {
 	}
 }
 
+func TestParseScanArgsScrubsInvalidFlagValues(t *testing.T) {
+	tests := []struct {
+		name   string
+		secret string
+		args   []string
+	}{
+		{
+			name:   "duration",
+			secret: "super-secret-timeout",
+			args: []string{
+				"https://docs.example.com/",
+				"--timeout=super-secret-timeout",
+			},
+		},
+		{
+			name:   "bool",
+			secret: "super-secret-bool",
+			args: []string{
+				"https://docs.example.com/",
+				"--fail-on-dead=super-secret-bool",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseScanArgs(tt.args)
+			if err == nil {
+				t.Fatal("ParseScanArgs() error = nil; want error")
+			}
+			if strings.Contains(err.Error(), tt.secret) {
+				t.Fatalf("error %q leaks invalid flag value", err)
+			}
+		})
+	}
+}
+
 func TestParseScanArgsRejectsSplitHeaderWithoutLeakingValue(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -228,27 +265,49 @@ func TestParseScanArgsRejectsSplitHeaderWithoutLeakingValue(t *testing.T) {
 	}
 }
 
-func TestParseScanArgsAcceptsEmptyHeaderBeforeEntryURL(t *testing.T) {
-	opts, err := ParseScanArgs([]string{
-		"--header", "X-Empty:",
-		"https://docs.example.com/",
-		"--max-pages", "2",
-	})
-	if err != nil {
-		t.Fatalf("ParseScanArgs() error = %v", err)
+func TestParseScanArgsAcceptsEmptyHeaderAroundEntryURL(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "before entry URL",
+			args: []string{
+				"--header", "X-Empty:",
+				"https://docs.example.com/",
+				"--max-pages", "2",
+			},
+		},
+		{
+			name: "after entry URL",
+			args: []string{
+				"https://docs.example.com/",
+				"--header", "X-Empty:",
+				"--max-pages", "2",
+			},
+		},
 	}
 
-	if len(opts.headers) != 1 {
-		t.Fatalf("headers = %#v; want 1", opts.headers)
-	}
-	if opts.headers[0] != (requestHeader{Name: "X-Empty", Value: ""}) {
-		t.Fatalf("header = %#v", opts.headers[0])
-	}
-	if opts.entryURL != "https://docs.example.com/" {
-		t.Fatalf("entryURL = %q", opts.entryURL)
-	}
-	if opts.maxPages != 2 {
-		t.Fatalf("maxPages = %d", opts.maxPages)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts, err := ParseScanArgs(tt.args)
+			if err != nil {
+				t.Fatalf("ParseScanArgs() error = %v", err)
+			}
+
+			if len(opts.headers) != 1 {
+				t.Fatalf("headers = %#v; want 1", opts.headers)
+			}
+			if opts.headers[0] != (requestHeader{Name: "X-Empty", Value: ""}) {
+				t.Fatalf("header = %#v", opts.headers[0])
+			}
+			if opts.entryURL != "https://docs.example.com/" {
+				t.Fatalf("entryURL = %q", opts.entryURL)
+			}
+			if opts.maxPages != 2 {
+				t.Fatalf("maxPages = %d", opts.maxPages)
+			}
+		})
 	}
 }
 
