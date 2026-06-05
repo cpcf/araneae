@@ -143,6 +143,13 @@ func isHTMLContentType(contentType string) bool {
 	return strings.Contains(strings.ToLower(contentType), "text/html")
 }
 
+func isRetryableFetchResult(result FetchResult) bool {
+	if result.Error != "" {
+		return result.Error == "network_error" || result.Error == "timeout"
+	}
+	return result.StatusCode == http.StatusTooManyRequests || (result.StatusCode >= 500 && result.StatusCode <= 599)
+}
+
 func classifyFetchError(err error) string {
 	if errors.Is(err, errTooManyRedirects) {
 		return "too_many_redirects"

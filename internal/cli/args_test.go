@@ -14,6 +14,8 @@ func TestParseScanArgsAcceptsFlagsAfterEntryURL(t *testing.T) {
 		"--concurrency", "2",
 		"--max-requests-per-second", "4.5",
 		"--max-response-bytes", "123456",
+		"--retries", "2",
+		"--retry-backoff", "750ms",
 		"--allow-host", "https://www.example.com",
 		"--path-prefix", "/docs/",
 		"--local-root", "public",
@@ -46,6 +48,12 @@ func TestParseScanArgsAcceptsFlagsAfterEntryURL(t *testing.T) {
 	if opts.maxResponseBytes != 123456 {
 		t.Fatalf("maxResponseBytes = %d", opts.maxResponseBytes)
 	}
+	if opts.retries != 2 {
+		t.Fatalf("retries = %d", opts.retries)
+	}
+	if opts.retryBackoff != 750*time.Millisecond {
+		t.Fatalf("retryBackoff = %s", opts.retryBackoff)
+	}
 	if len(opts.allowHosts) != 1 || opts.allowHosts[0] != "https://www.example.com" {
 		t.Fatalf("allowHosts = %#v", opts.allowHosts)
 	}
@@ -72,6 +80,12 @@ func TestParseScanArgsDefaultsMaxResponseBytes(t *testing.T) {
 	if opts.maxResponseBytes != 5*1024*1024 {
 		t.Fatalf("maxResponseBytes = %d; want 5242880", opts.maxResponseBytes)
 	}
+	if opts.retries != 0 {
+		t.Fatalf("retries = %d; want 0", opts.retries)
+	}
+	if opts.retryBackoff != 500*time.Millisecond {
+		t.Fatalf("retryBackoff = %s; want 500ms", opts.retryBackoff)
+	}
 }
 
 func TestParseScanArgsAcceptsUnlimitedMaxResponseBytes(t *testing.T) {
@@ -92,6 +106,26 @@ func TestParseScanArgsRejectsNegativeMaxResponseBytes(t *testing.T) {
 	_, err := ParseScanArgs([]string{
 		"https://docs.example.com/",
 		"--max-response-bytes", "-1",
+	})
+	if err == nil {
+		t.Fatal("ParseScanArgs() error = nil; want error")
+	}
+}
+
+func TestParseScanArgsRejectsNegativeRetries(t *testing.T) {
+	_, err := ParseScanArgs([]string{
+		"https://docs.example.com/",
+		"--retries", "-1",
+	})
+	if err == nil {
+		t.Fatal("ParseScanArgs() error = nil; want error")
+	}
+}
+
+func TestParseScanArgsRejectsNegativeRetryBackoff(t *testing.T) {
+	_, err := ParseScanArgs([]string{
+		"https://docs.example.com/",
+		"--retry-backoff", "-1s",
 	})
 	if err == nil {
 		t.Fatal("ParseScanArgs() error = nil; want error")

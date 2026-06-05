@@ -23,6 +23,8 @@ type scanOptions struct {
 	concurrency      int
 	maxReqPerSec     float64
 	maxResponseBytes int64
+	retries          int
+	retryBackoff     time.Duration
 	allowHosts       []string
 	pathPrefix       string
 	localRoot        string
@@ -56,6 +58,8 @@ func ParseScanArgs(args []string) (scanOptions, error) {
 	fs.IntVar(&opts.concurrency, "concurrency", 8, "fetch concurrency")
 	fs.Float64Var(&opts.maxReqPerSec, "max-requests-per-second", 0, "maximum request starts per second; 0 means unlimited")
 	fs.Int64Var(&opts.maxResponseBytes, "max-response-bytes", defaultMaxResponseBytes, "maximum HTML response body bytes to read; 0 means unlimited")
+	fs.IntVar(&opts.retries, "retries", 0, "retry count for transient fetch failures; 0 disables retries")
+	fs.DurationVar(&opts.retryBackoff, "retry-backoff", 500*time.Millisecond, "delay between retry attempts")
 	fs.Var(&allowHosts, "allow-host", "additional exact origins allowed for crawl")
 	fs.StringVar(&opts.pathPrefix, "path-prefix", "", "optional path prefix restriction")
 	fs.StringVar(&opts.localRoot, "local-root", "", "local static site root to seed crawl with every HTML page")
@@ -90,6 +94,12 @@ func ParseScanArgs(args []string) (scanOptions, error) {
 	if opts.maxResponseBytes < 0 {
 		return opts, fmt.Errorf("%s: --max-response-bytes must be >= 0", cmd)
 	}
+	if opts.retries < 0 {
+		return opts, fmt.Errorf("%s: --retries must be >= 0", cmd)
+	}
+	if opts.retryBackoff < 0 {
+		return opts, fmt.Errorf("%s: --retry-backoff must be >= 0", cmd)
+	}
 
 	return opts, nil
 }
@@ -107,6 +117,8 @@ func RunScan(args []string) error {
 		Concurrency:          opts.concurrency,
 		MaxRequestsPerSecond: opts.maxReqPerSec,
 		MaxResponseBytes:     opts.maxResponseBytes,
+		Retries:              opts.retries,
+		RetryBackoff:         opts.retryBackoff,
 		AllowHosts:           opts.allowHosts,
 		PathPrefix:           opts.pathPrefix,
 		LocalRoot:            opts.localRoot,

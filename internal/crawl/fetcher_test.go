@@ -197,6 +197,73 @@ func TestHTTPFetcherRecordsDurationForFetchError(t *testing.T) {
 	}
 }
 
+func TestRetryableFetchResult(t *testing.T) {
+	tests := []struct {
+		name   string
+		result FetchResult
+		want   bool
+	}{
+		{
+			name:   "network error",
+			result: FetchResult{Error: "network_error"},
+			want:   true,
+		},
+		{
+			name:   "timeout",
+			result: FetchResult{Error: "timeout"},
+			want:   true,
+		},
+		{
+			name:   "too many requests",
+			result: FetchResult{StatusCode: http.StatusTooManyRequests},
+			want:   true,
+		},
+		{
+			name:   "server error",
+			result: FetchResult{StatusCode: http.StatusServiceUnavailable},
+			want:   true,
+		},
+		{
+			name:   "not found",
+			result: FetchResult{StatusCode: http.StatusNotFound},
+			want:   false,
+		},
+		{
+			name:   "gone",
+			result: FetchResult{StatusCode: http.StatusGone},
+			want:   false,
+		},
+		{
+			name:   "response too large",
+			result: FetchResult{StatusCode: http.StatusOK, Error: problemResponseTooLarge},
+			want:   false,
+		},
+		{
+			name:   "parsing error",
+			result: FetchResult{StatusCode: http.StatusOK, Error: "parsing_error: broken html"},
+			want:   false,
+		},
+		{
+			name:   "tls error",
+			result: FetchResult{Error: "tls_error"},
+			want:   false,
+		},
+		{
+			name:   "ok",
+			result: FetchResult{StatusCode: http.StatusOK},
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isRetryableFetchResult(tt.result); got != tt.want {
+				t.Fatalf("isRetryableFetchResult() = %v; want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {

@@ -106,6 +106,8 @@ Important flags:
 - `--concurrency 8`: number of concurrent fetch workers.
 - `--max-requests-per-second 0`: maximum request starts per second across all workers. `0` means unlimited.
 - `--max-response-bytes 5242880`: maximum HTML response body bytes to read. `0` means unlimited.
+- `--retries 0`: retry count for transient fetch failures. `0` disables retries.
+- `--retry-backoff 500ms`: delay between retry attempts.
 - `--allow-host https://www.example.com`: additional exact origin that is safe to crawl. Can be repeated.
 - `--path-prefix /docs/`: optional normalized path prefix that same-scope links must match.
 - `--local-root public`: local static site root to seed the crawl with every `.html`/`.htm` page.
@@ -121,6 +123,8 @@ araneae scan https://docs.example.com/ \
   --max-pages 1000 \
   --concurrency 8 \
   --max-response-bytes 5242880 \
+  --retries 2 \
+  --retry-backoff 500ms \
   --max-requests-per-second 5
 ```
 
@@ -149,6 +153,8 @@ araneae scan http://localhost:8000/docs/ \
 `--local-root` treats the directory as being served at the entry URL path. It maps `index.html` to the directory URL, for example `guide/index.html` becomes `/docs/guide/`.
 
 For large docs sites and private preview environments, keep `--max-response-bytes` at the default unless you know pages legitimately need more room. The limit applies to HTML bodies because those are parsed for links and fragments. Non-HTML responses such as PDFs and downloads are checked from status, redirects, final URL, and content type without reading the full body. Use `--max-response-bytes 0` only when you deliberately want unlimited HTML body reads.
+
+Use retries only when the target environment has occasional transient failures, such as preview hosts behind cold caches or short deploy windows. Retries apply to network errors, timeouts, HTTP 429, and HTTP 5xx responses. They do not retry deterministic outcomes such as 404, 410, missing fragments, parsing errors, or HTML responses over `--max-response-bytes`.
 
 Use in CI:
 
@@ -210,7 +216,9 @@ The scan writes a JSON report. The top-level shape is:
     "request_timeout_seconds": 15,
     "max_concurrency": 8,
     "max_requests_per_second": 0,
-    "max_response_bytes": 5242880
+    "max_response_bytes": 5242880,
+    "retries": 0,
+    "retry_backoff_ms": 500
   },
   "summary": {
     "links_discovered": 5,

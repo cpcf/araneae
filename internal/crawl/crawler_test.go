@@ -159,6 +159,127 @@ func TestSequentialCrawlerNon200Handled(t *testing.T) {
 	}
 }
 
+func TestCrawlerRetriesTransientStatusThenReportsFinalOK(t *testing.T) {
+	var unstableAttempts int32
+	retrySleeps := []time.Duration{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(`<a href="/unstable">Unstable</a>`))
+		case "/unstable":
+			attempt := atomic.AddInt32(&unstableAttempts, 1)
+			if attempt == 1 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = w.Write([]byte("try again"))
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte("<p>ok</p>"))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	reportData, err := Run(context.Background(), ScanOptions{
+		EntryURL:     server.URL + "/",
+		MaxPages:     10,
+		Timeout:      2 * time.Second,
+		UserAgent:    "araneae-test",
+		Concurrency:  1,
+		Retries:      1,
+		RetryBackoff: 25 * time.Millisecond,
+		retrySleep: func(_ context.Context, d time.Duration) error {
+			retrySleeps = append(retrySleeps, d)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("run scanner: %v", err)
+	}
+
+	if got := atomic.LoadInt32(&unstableAttempts); got != 2 {
+		t.Fatalf("unstable attempts = %d; want 2", got)
+	}
+	if len(retrySleeps) != 1 || retrySleeps[0] != 25*time.Millisecond {
+		t.Fatalf("retry sleeps = %#v; want [25ms]", retrySleeps)
+	}
+	if reportData.Limits.Retries != 1 {
+		t.Fatalf("report retries = %d; want 1", reportData.Limits.Retries)
+	}
+	if reportData.Limits.RetryBackoffMS != 25 {
+		t.Fatalf("report retry_backoff_ms = %d; want 25", reportData.Limits.RetryBackoffMS)
+	}
+
+	link := findLinkByURL(reportData, server.URL+"/unstable")
+	if link == nil {
+		t.Fatalf("unstable link not found")
+	}
+	if !link.OK || link.Dead || link.Non200 || link.StatusCode != http.StatusOK || link.Error != "" {
+		t.Fatalf("unstable health = ok:%v dead:%v non200:%v status:%d error:%q; want final OK", link.OK, link.Dead, link.Non200, link.StatusCode, link.Error)
+	}
+
+	fetch := findFetchByURL(reportData, server.URL+"/unstable")
+	if fetch == nil {
+		t.Fatalf("unstable fetch not found")
+	}
+	if fetch.StatusCode != http.StatusOK || fetch.Error != "" {
+		t.Fatalf("unstable fetch status/error = %d/%q; want 200/empty", fetch.StatusCode, fetch.Error)
+	}
+}
+
+func TestCrawlerDoesNotRetryNotFound(t *testing.T) {
+	var notFoundAttempts int32
+	var sleepCalls int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(`<a href="/not-found">Missing</a>`))
+		case "/not-found":
+			atomic.AddInt32(&notFoundAttempts, 1)
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte("missing"))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	reportData, err := Run(context.Background(), ScanOptions{
+		EntryURL:     server.URL + "/",
+		MaxPages:     10,
+		Timeout:      2 * time.Second,
+		UserAgent:    "araneae-test",
+		Concurrency:  1,
+		Retries:      3,
+		RetryBackoff: 25 * time.Millisecond,
+		retrySleep: func(_ context.Context, d time.Duration) error {
+			atomic.AddInt32(&sleepCalls, 1)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("run scanner: %v", err)
+	}
+
+	if got := atomic.LoadInt32(&notFoundAttempts); got != 1 {
+		t.Fatalf("not found attempts = %d; want 1", got)
+	}
+	if got := atomic.LoadInt32(&sleepCalls); got != 0 {
+		t.Fatalf("retry sleep calls = %d; want 0", got)
+	}
+
+	link := findLinkByURL(reportData, server.URL+"/not-found")
+	if link == nil {
+		t.Fatalf("not found link not found")
+	}
+	if link.OK || !link.Dead || !link.Non200 || link.Problem != "http_status" {
+		t.Fatalf("not found health = ok:%v dead:%v non200:%v problem:%q; want dead non-200 http_status", link.OK, link.Dead, link.Non200, link.Problem)
+	}
+}
+
 func TestSequentialCrawlerRedirectChainRecorded(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

@@ -29,6 +29,8 @@ type ReportLimits struct {
 	MaxConcurrency       int     `json:"max_concurrency"`
 	MaxRequestsPerSecond float64 `json:"max_requests_per_second"`
 	MaxResponseBytes     int64   `json:"max_response_bytes"`
+	Retries              int     `json:"retries"`
+	RetryBackoffMS       int64   `json:"retry_backoff_ms"`
 }
 
 type ReportSummary struct {

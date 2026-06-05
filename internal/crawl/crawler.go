@@ -22,6 +22,8 @@ type ScanOptions struct {
 	Concurrency          int
 	MaxRequestsPerSecond float64
 	MaxResponseBytes     int64
+	Retries              int
+	RetryBackoff         time.Duration
 	AllowHosts           []string
 	PathPrefix           string
 	LocalRoot            string
@@ -30,6 +32,7 @@ type ScanOptions struct {
 	Parser               Parser
 	ForceNow             func() time.Time
 	requestGate          requestGate
+	retrySleep           func(context.Context, time.Duration) error
 }
 
 type Crawler struct {
@@ -78,6 +81,12 @@ func NewCrawler(opts ScanOptions) *Crawler {
 	if opts.Concurrency <= 0 {
 		opts.Concurrency = 1
 	}
+	if opts.Retries < 0 {
+		opts.Retries = 0
+	}
+	if opts.RetryBackoff < 0 {
+		opts.RetryBackoff = 0
+	}
 	return &Crawler{
 		opts:    opts,
 		fetcher: fetcher,
@@ -108,10 +117,7 @@ func (c *Crawler) Run(ctx context.Context) (report.Report, error) {
 	if requestGate == nil {
 		requestGate = newRequestGate(c.opts.MaxRequestsPerSecond)
 	}
-	if err := requestGate.Wait(ctx); err != nil {
-		return report.Report{}, fmt.Errorf("rate limit wait failed: %w", err)
-	}
-	entryFetch, err := c.fetcher.Fetch(ctx, entryURL)
+	entryFetch, err := c.fetchWithRetries(ctx, requestGate, entryURL)
 	if err != nil {
 		return report.Report{}, fmt.Errorf("entry fetch request failed: %w", err)
 	}
@@ -146,11 +152,7 @@ func (c *Crawler) Run(ctx context.Context) (report.Report, error) {
 		for i := 0; i < c.opts.Concurrency; i++ {
 			workerWG.Go(func() {
 				for fetchURL := range taskCh {
-					err := requestGate.Wait(ctx)
-					var fetch FetchResult
-					if err == nil {
-						fetch, err = c.fetcher.Fetch(ctx, fetchURL)
-					}
+					fetch, err := c.fetchWithRetries(ctx, requestGate, fetchURL)
 					resultCh <- fetchOutcome{fetch: fetch, err: err}
 				}
 			})
@@ -461,12 +463,51 @@ func (c *Crawler) Run(ctx context.Context) (report.Report, error) {
 			MaxConcurrency:       c.opts.Concurrency,
 			MaxRequestsPerSecond: c.opts.MaxRequestsPerSecond,
 			MaxResponseBytes:     c.opts.MaxResponseBytes,
+			Retries:              c.opts.Retries,
+			RetryBackoffMS:       c.opts.RetryBackoff.Milliseconds(),
 		},
 		Summary:      summary,
 		Links:        reportLinks,
 		Fetches:      reportFetches,
 		SkippedLinks: reportSkips,
 	}, nil
+}
+
+func (c *Crawler) fetchWithRetries(ctx context.Context, requestGate requestGate, fetchURL string) (FetchResult, error) {
+	attempts := c.opts.Retries + 1
+	for attempt := 0; attempt < attempts; attempt++ {
+		if err := requestGate.Wait(ctx); err != nil {
+			return FetchResult{}, err
+		}
+		fetch, err := c.fetcher.Fetch(ctx, fetchURL)
+		if err != nil {
+			return fetch, err
+		}
+		if attempt == attempts-1 || !isRetryableFetchResult(fetch) {
+			return fetch, nil
+		}
+		if err := c.sleepBeforeRetry(ctx); err != nil {
+			return FetchResult{}, err
+		}
+	}
+	return FetchResult{}, nil
+}
+
+func (c *Crawler) sleepBeforeRetry(ctx context.Context) error {
+	if c.opts.RetryBackoff <= 0 {
+		return nil
+	}
+	if c.opts.retrySleep != nil {
+		return c.opts.retrySleep(ctx, c.opts.RetryBackoff)
+	}
+	timer := time.NewTimer(c.opts.RetryBackoff)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func firstNonEmpty(values ...string) string {
