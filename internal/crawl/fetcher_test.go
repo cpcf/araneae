@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"testing"
@@ -194,6 +195,19 @@ func TestHTTPFetcherRecordsDurationForFetchError(t *testing.T) {
 	}
 	if result.Duration != 25*time.Millisecond {
 		t.Fatalf("duration = %s; want 25ms", result.Duration)
+	}
+}
+
+func TestReadResponseBodyAllowsMaxInt64Limit(t *testing.T) {
+	body, tooLarge, err := readResponseBody(strings.NewReader("<p>ok</p>"), math.MaxInt64)
+	if err != nil {
+		t.Fatalf("readResponseBody() error = %v", err)
+	}
+	if tooLarge {
+		t.Fatal("readResponseBody() tooLarge = true; want false")
+	}
+	if string(body) != "<p>ok</p>" {
+		t.Fatalf("body = %q; want <p>ok</p>", string(body))
 	}
 }
 

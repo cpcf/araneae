@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"io"
+	"math"
 	"mime"
 	"net"
 	"net/http"
@@ -121,6 +122,10 @@ func (f *HTTPFetcher) nowUTC() time.Time {
 
 func readResponseBody(body io.Reader, maxBytes int64) ([]byte, bool, error) {
 	if maxBytes <= 0 {
+		read, err := io.ReadAll(body)
+		return read, false, err
+	}
+	if maxBytes == math.MaxInt64 {
 		read, err := io.ReadAll(body)
 		return read, false, err
 	}

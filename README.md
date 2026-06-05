@@ -263,7 +263,7 @@ Each `links` entry represents one normalized navigable URL. Fragment variants ar
 }
 ```
 
-Each `fetches` entry records one fetched URL, including redirect metadata, when the check completed, and `duration_ms`, the elapsed fetch time in milliseconds:
+Each `fetches` entry records one fetched URL, including redirect metadata, when the check completed, and `duration_ms`, the elapsed fetch time in milliseconds. When retries are enabled, `duration_ms` covers the final reported retry cycle, including retry attempts and configured retry backoff delays.
 
 ```json
 {

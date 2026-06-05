@@ -280,6 +280,97 @@ func TestCrawlerDoesNotRetryNotFound(t *testing.T) {
 	}
 }
 
+func TestCrawlerReportsRetryCycleDurationMilliseconds(t *testing.T) {
+	entry := "https://docs.example.test/"
+	unstableURL := "https://docs.example.test/unstable"
+	fetcher := newSequencedFetcher(map[string][]FetchResult{
+		entry: {
+			{
+				URL:         entry,
+				StatusCode:  http.StatusOK,
+				FinalURL:    entry,
+				ContentType: "text/html; charset=utf-8",
+				Body:        []byte(`<a href="/unstable">Unstable</a>`),
+				Duration:    3 * time.Millisecond,
+				CheckedAt:   time.Now().UTC(),
+			},
+		},
+		unstableURL: {
+			{
+				URL:         unstableURL,
+				StatusCode:  http.StatusServiceUnavailable,
+				FinalURL:    unstableURL,
+				ContentType: "text/html; charset=utf-8",
+				Duration:    11 * time.Millisecond,
+				CheckedAt:   time.Now().UTC(),
+			},
+			{
+				URL:         unstableURL,
+				StatusCode:  http.StatusOK,
+				FinalURL:    unstableURL,
+				ContentType: "text/html; charset=utf-8",
+				Body:        []byte("<p>ok</p>"),
+				Duration:    7 * time.Millisecond,
+				CheckedAt:   time.Now().UTC(),
+			},
+		},
+	})
+
+	reportData, err := Run(context.Background(), ScanOptions{
+		EntryURL:     entry,
+		MaxPages:     10,
+		Timeout:      2 * time.Second,
+		UserAgent:    "araneae-test",
+		Concurrency:  1,
+		Fetcher:      fetcher,
+		Retries:      1,
+		RetryBackoff: 25 * time.Millisecond,
+		retrySleep: func(_ context.Context, _ time.Duration) error {
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("run scanner: %v", err)
+	}
+
+	unstableFetch := findFetchByURL(reportData, unstableURL)
+	if unstableFetch == nil {
+		t.Fatalf("unstable fetch not found")
+	}
+	if unstableFetch.DurationMS != 43 {
+		t.Fatalf("unstable duration_ms = %d; want 43", unstableFetch.DurationMS)
+	}
+	if got := fetcher.requestCount(unstableURL); got != 2 {
+		t.Fatalf("unstable attempts = %d; want 2", got)
+	}
+}
+
+func TestCrawlerStopsZeroBackoffRetriesWhenContextCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	fetcher := &cancelingRetryFetcher{cancel: cancel}
+
+	_, err := Run(ctx, ScanOptions{
+		EntryURL:     "https://docs.example.test/",
+		MaxPages:     1,
+		Timeout:      2 * time.Second,
+		UserAgent:    "araneae-test",
+		Concurrency:  1,
+		Fetcher:      fetcher,
+		Retries:      3,
+		RetryBackoff: 0,
+	})
+	if err == nil {
+		t.Fatal("run scanner error = nil; want context cancellation")
+	}
+	if !strings.Contains(err.Error(), context.Canceled.Error()) {
+		t.Fatalf("run scanner error = %v; want context cancellation", err)
+	}
+	if got := fetcher.requestCount(); got != 1 {
+		t.Fatalf("fetch attempts = %d; want 1", got)
+	}
+}
+
 func TestSequentialCrawlerRedirectChainRecorded(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -828,6 +919,78 @@ func writeTestFile(t *testing.T, path string, contents string) {
 	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
+}
+
+type sequencedFetcher struct {
+	mu      sync.Mutex
+	results map[string][]FetchResult
+	calls   map[string]int
+}
+
+func newSequencedFetcher(results map[string][]FetchResult) *sequencedFetcher {
+	return &sequencedFetcher{
+		results: results,
+		calls:   map[string]int{},
+	}
+}
+
+func (f *sequencedFetcher) Fetch(_ context.Context, fetchURL string) (FetchResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	call := f.calls[fetchURL]
+	f.calls[fetchURL] = call + 1
+
+	sequence := f.results[fetchURL]
+	if len(sequence) == 0 {
+		return FetchResult{
+			URL:         fetchURL,
+			StatusCode:  http.StatusNotFound,
+			FinalURL:    fetchURL,
+			ContentType: "text/html; charset=utf-8",
+			CheckedAt:   time.Now().UTC(),
+		}, nil
+	}
+	if call >= len(sequence) {
+		call = len(sequence) - 1
+	}
+	result := sequence[call]
+	if result.URL == "" {
+		result.URL = fetchURL
+	}
+	if result.FinalURL == "" {
+		result.FinalURL = fetchURL
+	}
+	result.RedirectChain = append([]string{}, result.RedirectChain...)
+	result.Body = append([]byte{}, result.Body...)
+	return result, nil
+}
+
+func (f *sequencedFetcher) requestCount(fetchURL string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls[fetchURL]
+}
+
+type cancelingRetryFetcher struct {
+	cancel   context.CancelFunc
+	requests int32
+}
+
+func (f *cancelingRetryFetcher) Fetch(_ context.Context, fetchURL string) (FetchResult, error) {
+	if atomic.AddInt32(&f.requests, 1) == 1 {
+		f.cancel()
+	}
+	return FetchResult{
+		URL:       fetchURL,
+		FinalURL:  fetchURL,
+		Error:     "network_error",
+		CheckedAt: time.Now().UTC(),
+	}, nil
+}
+
+func (f *cancelingRetryFetcher) requestCount() int {
+	return int(atomic.LoadInt32(&f.requests))
 }
 
 type scriptedFetch struct {

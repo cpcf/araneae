@@ -475,6 +475,7 @@ func (c *Crawler) Run(ctx context.Context) (report.Report, error) {
 
 func (c *Crawler) fetchWithRetries(ctx context.Context, requestGate requestGate, fetchURL string) (FetchResult, error) {
 	attempts := c.opts.Retries + 1
+	totalDuration := time.Duration(0)
 	for attempt := 0; attempt < attempts; attempt++ {
 		if err := requestGate.Wait(ctx); err != nil {
 			return FetchResult{}, err
@@ -483,19 +484,27 @@ func (c *Crawler) fetchWithRetries(ctx context.Context, requestGate requestGate,
 		if err != nil {
 			return fetch, err
 		}
+		totalDuration += fetch.Duration
 		if attempt == attempts-1 || !isRetryableFetchResult(fetch) {
+			fetch.Duration = totalDuration
 			return fetch, nil
 		}
 		if err := c.sleepBeforeRetry(ctx); err != nil {
 			return FetchResult{}, err
 		}
+		totalDuration += c.opts.RetryBackoff
 	}
 	return FetchResult{}, nil
 }
 
 func (c *Crawler) sleepBeforeRetry(ctx context.Context) error {
 	if c.opts.RetryBackoff <= 0 {
-		return nil
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			return nil
+		}
 	}
 	if c.opts.retrySleep != nil {
 		return c.opts.retrySleep(ctx, c.opts.RetryBackoff)

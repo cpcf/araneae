@@ -13,8 +13,13 @@ type requestGate interface {
 
 type noopRequestGate struct{}
 
-func (noopRequestGate) Wait(context.Context) error {
-	return nil
+func (noopRequestGate) Wait(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return nil
+	}
 }
 
 type intervalRequestGate struct {
