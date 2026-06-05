@@ -1,6 +1,7 @@
 package crawl
 
 import (
+	"bytes"
 	"context"
 	"math"
 	"net/http"
@@ -266,6 +267,48 @@ func TestCrawlerSendsConfiguredRequestHeaders(t *testing.T) {
 	}
 	if !sawRequest.Load() {
 		t.Fatal("server did not receive request")
+	}
+}
+
+func TestCrawlerReportDoesNotIncludeRequestHeaders(t *testing.T) {
+	const secret = "araneae-test-secret-7d77d8b5"
+	var sawSecret atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer "+secret {
+			sawSecret.Store(true)
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte("<p>ok</p>"))
+	}))
+	defer server.Close()
+
+	reportData, err := Run(context.Background(), ScanOptions{
+		EntryURL:    server.URL + "/",
+		MaxPages:    1,
+		Timeout:     2 * time.Second,
+		UserAgent:   "araneae-test",
+		Concurrency: 1,
+		Headers: []RequestHeader{
+			{Name: "Authorization", Value: "Bearer " + secret},
+			{Name: "X-Araneae-Secret", Value: secret},
+		},
+	})
+	if err != nil {
+		t.Fatalf("run scanner: %v", err)
+	}
+	if !sawSecret.Load() {
+		t.Fatal("server did not receive secret Authorization header")
+	}
+
+	var output bytes.Buffer
+	if err := report.Write(&output, reportData); err != nil {
+		t.Fatalf("write report: %v", err)
+	}
+	if strings.Contains(output.String(), secret) {
+		t.Fatalf("report JSON contains secret header value")
+	}
+	if strings.Contains(output.String(), "Authorization") || strings.Contains(output.String(), "X-Araneae-Secret") {
+		t.Fatalf("report JSON contains request header names")
 	}
 }
 
