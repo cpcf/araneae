@@ -493,7 +493,6 @@ func (c *Crawler) fetchWithRetries(ctx context.Context, requestGate requestGate,
 		}
 		totalDuration += c.opts.RetryBackoff
 	}
-	return FetchResult{}, nil
 }
 
 func (c *Crawler) sleepBeforeRetry(ctx context.Context) error {
