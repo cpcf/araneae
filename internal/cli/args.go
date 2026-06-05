@@ -53,6 +53,9 @@ func interspersePositionals(fs *flag.FlagSet, args []string) ([]string, error) {
 		if i+1 >= len(args) {
 			continue
 		}
+		if name == "header" && looksLikeSplitHeaderValue(args[i+1], args, i+2) {
+			return nil, fmt.Errorf("--header value looks split; quote the full header value")
+		}
 		i++
 		flags = append(flags, args[i])
 	}
@@ -78,4 +81,11 @@ func followsHeaderValue(args []string, index int) bool {
 		return true
 	}
 	return false
+}
+
+func looksLikeSplitHeaderValue(value string, args []string, next int) bool {
+	if next >= len(args) {
+		return false
+	}
+	return strings.HasSuffix(strings.TrimSpace(value), ":") && looksLikeFlag(args[next])
 }

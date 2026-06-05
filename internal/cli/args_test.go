@@ -169,16 +169,39 @@ func TestParseScanArgsRejectsMalformedHeader(t *testing.T) {
 }
 
 func TestParseScanArgsRejectsSplitHeaderWithoutLeakingValue(t *testing.T) {
-	secret := "fake-secret-token"
-	_, err := ParseScanArgs([]string{
-		"https://docs.example.com/",
-		"--header", "Authorization:", "--" + secret,
-	})
-	if err == nil {
-		t.Fatal("ParseScanArgs() error = nil; want error")
+	tests := []struct {
+		name   string
+		secret string
+		args   []string
+	}{
+		{
+			name:   "unknown flag token",
+			secret: "fake-secret-token",
+			args: []string{
+				"https://docs.example.com/",
+				"--header", "Authorization:", "--fake-secret-token",
+			},
+		},
+		{
+			name:   "defined flag token",
+			secret: "super-secret-timeout",
+			args: []string{
+				"https://docs.example.com/",
+				"--header", "Authorization:", "--timeout=super-secret-timeout",
+			},
+		},
 	}
-	if strings.Contains(err.Error(), secret) {
-		t.Fatalf("error %q leaks split header value", err)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseScanArgs(tt.args)
+			if err == nil {
+				t.Fatal("ParseScanArgs() error = nil; want error")
+			}
+			if strings.Contains(err.Error(), tt.secret) {
+				t.Fatalf("error %q leaks split header value", err)
+			}
+		})
 	}
 }
 
