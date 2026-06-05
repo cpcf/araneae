@@ -108,6 +108,7 @@ Important flags:
 - `--max-response-bytes 5242880`: maximum HTML response body bytes to read. `0` means unlimited.
 - `--retries 0`: retry count for transient fetch failures, from `0` to `100`. `0` disables retries.
 - `--retry-backoff 500ms`: delay between retry attempts.
+- `--header "Name: value"`: HTTP request header to send with scan requests. Can be repeated.
 - `--allow-host https://www.example.com`: additional exact origin that is safe to crawl. Can be repeated.
 - `--path-prefix /docs/`: optional normalized path prefix that same-scope links must match.
 - `--local-root public`: local static site root to seed the crawl with every `.html`/`.htm` page.
@@ -134,6 +135,22 @@ Allow a second exact origin:
 araneae scan https://docs.example.com/ \
   --allow-host https://www.example.com
 ```
+
+Scan an authenticated preview with a bearer token:
+
+```sh
+araneae scan https://preview.example.com/docs/ \
+  --header "Authorization: Bearer $DOCS_PREVIEW_TOKEN"
+```
+
+Scan a preview that uses cookie-based access:
+
+```sh
+araneae scan https://preview.example.com/docs/ \
+  --header "Cookie: preview_session=$DOCS_PREVIEW_COOKIE"
+```
+
+Quote the whole header argument so the shell passes the colon and spaces as one value. In CI, store token and cookie values in the platform's secret store and expand them through environment variables. Configured request header names and values are not written to the JSON report. Headers are sent on same-origin redirects, but Araneae removes configured headers before following a cross-origin redirect. If `User-Agent` is provided with `--header`, the `--user-agent` flag value wins.
 
 Limit crawling to a docs subtree:
 
