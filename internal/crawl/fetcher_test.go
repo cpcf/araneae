@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHTTPFetcherLimitsHTMLResponseBody(t *testing.T) {
@@ -140,6 +141,62 @@ func TestHTTPFetcherSkipsNonOKHTMLResponseBody(t *testing.T) {
 	}
 }
 
+func TestHTTPFetcherRecordsDurationForCompletedRequest(t *testing.T) {
+	start := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	fetcher := &HTTPFetcher{
+		userAgent:        "araneae-test",
+		maxResponseBytes: 1024,
+		now:              sequenceClock(start, start.Add(1375*time.Millisecond)),
+		client: &http.Client{
+			Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				headers := make(http.Header)
+				headers.Set("Content-Type", "text/html; charset=utf-8")
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     headers,
+					Body:       io.NopCloser(strings.NewReader("<p>ok</p>")),
+					Request:    req,
+				}, nil
+			}),
+		},
+	}
+
+	result, err := fetcher.Fetch(context.Background(), "https://docs.example.test/")
+	if err != nil {
+		t.Fatalf("Fetch() error = %v", err)
+	}
+	if result.Duration != 1375*time.Millisecond {
+		t.Fatalf("duration = %s; want 1.375s", result.Duration)
+	}
+	if !result.CheckedAt.Equal(start.Add(1375 * time.Millisecond)) {
+		t.Fatalf("checked_at = %s; want %s", result.CheckedAt, start.Add(1375*time.Millisecond))
+	}
+}
+
+func TestHTTPFetcherRecordsDurationForFetchError(t *testing.T) {
+	start := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	fetcher := &HTTPFetcher{
+		userAgent: "araneae-test",
+		now:       sequenceClock(start, start.Add(25*time.Millisecond)),
+		client: &http.Client{
+			Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				return nil, errors.New("dial failed")
+			}),
+		},
+	}
+
+	result, err := fetcher.Fetch(context.Background(), "https://docs.example.test/")
+	if err != nil {
+		t.Fatalf("Fetch() error = %v", err)
+	}
+	if result.Error != "network_error" {
+		t.Fatalf("error = %q; want network_error", result.Error)
+	}
+	if result.Duration != 25*time.Millisecond {
+		t.Fatalf("duration = %s; want 25ms", result.Duration)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -159,4 +216,16 @@ func (b *readTrackingBody) Read(_ []byte) (int, error) {
 func (b *readTrackingBody) Close() error {
 	b.closed = true
 	return nil
+}
+
+func sequenceClock(times ...time.Time) func() time.Time {
+	index := 0
+	return func() time.Time {
+		if index >= len(times) {
+			return times[len(times)-1]
+		}
+		current := times[index]
+		index++
+		return current
+	}
 }

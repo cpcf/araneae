@@ -265,6 +265,7 @@ func (c *Crawler) Run(ctx context.Context) (report.Report, error) {
 			Error:         fetch.Error,
 			RedirectChain: append([]string{}, fetch.RedirectChain...),
 			CheckedAt:     fetch.CheckedAt,
+			DurationMS:    fetch.Duration.Milliseconds(),
 		}
 	}
 

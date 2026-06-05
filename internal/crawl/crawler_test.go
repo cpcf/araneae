@@ -382,6 +382,43 @@ func TestSequentialCrawlerRecordsNonHTMLStatusWithoutParsing(t *testing.T) {
 	}
 }
 
+func TestCrawlerReportsFetchDurationMilliseconds(t *testing.T) {
+	entry := "https://docs.example.test/"
+	pageURL := "https://docs.example.test/page"
+	fetcher := newScriptedFetcher(map[string]scriptedFetch{
+		entry: {
+			status:      http.StatusOK,
+			contentType: "text/html; charset=utf-8",
+			body:        `<a href="/page">Page</a>`,
+			duration:    1500 * time.Millisecond,
+		},
+		pageURL: {
+			status:      http.StatusOK,
+			contentType: "text/html; charset=utf-8",
+			body:        "<p>ok</p>",
+			duration:    42 * time.Millisecond,
+		},
+	}, 0)
+
+	reportData := runScanWithFetcher(t, entry, 10, 1, fetcher)
+
+	entryFetch := findFetchByURL(reportData, entry)
+	if entryFetch == nil {
+		t.Fatalf("entry fetch not found")
+	}
+	if entryFetch.DurationMS != 1500 {
+		t.Fatalf("entry duration_ms = %d; want 1500", entryFetch.DurationMS)
+	}
+
+	pageFetch := findFetchByURL(reportData, pageURL)
+	if pageFetch == nil {
+		t.Fatalf("page fetch not found")
+	}
+	if pageFetch.DurationMS != 42 {
+		t.Fatalf("page duration_ms = %d; want 42", pageFetch.DurationMS)
+	}
+}
+
 func TestCrawlerSeedsLocalRootHTMLPages(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, filepath.Join(root, "index.html"), "<p>home</p>")
@@ -678,6 +715,7 @@ type scriptedFetch struct {
 	body        string
 	finalURL    string
 	redirects   []string
+	duration    time.Duration
 }
 
 type scriptedFetcher struct {
@@ -740,6 +778,7 @@ func (f *scriptedFetcher) Fetch(_ context.Context, fetchURL string) (FetchResult
 		Body:          []byte(page.body),
 		RedirectChain: append([]string{}, page.redirects...),
 		CheckedAt:     time.Now().UTC(),
+		Duration:      page.duration,
 	}, nil
 }
 

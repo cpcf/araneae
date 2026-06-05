@@ -21,6 +21,7 @@ type FetchResult struct {
 	Error         string
 	RedirectChain []string
 	CheckedAt     time.Time
+	Duration      time.Duration
 	Body          []byte
 }
 
@@ -32,6 +33,7 @@ type HTTPFetcher struct {
 	client           *http.Client
 	userAgent        string
 	maxResponseBytes int64
+	now              func() time.Time
 }
 
 var errTooManyRedirects = errors.New("too many redirects")
@@ -49,15 +51,25 @@ func NewHTTPFetcher(timeout time.Duration, userAgent string, maxResponseBytes in
 }
 
 func (f *HTTPFetcher) Fetch(ctx context.Context, fetchURL string) (FetchResult, error) {
+	startedAt := f.nowUTC()
 	result := FetchResult{
 		URL:       fetchURL,
-		CheckedAt: time.Now().UTC(),
+		CheckedAt: startedAt,
+	}
+	finish := func() FetchResult {
+		finishedAt := f.nowUTC()
+		result.CheckedAt = finishedAt
+		result.Duration = finishedAt.Sub(startedAt)
+		if result.Duration < 0 {
+			result.Duration = 0
+		}
+		return result
 	}
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, fetchURL, nil)
 	if err != nil {
 		result.Error = "network_error"
-		return result, nil
+		return finish(), nil
 	}
 	request.Header.Set("User-Agent", f.userAgent)
 
@@ -73,10 +85,9 @@ func (f *HTTPFetcher) Fetch(ctx context.Context, fetchURL string) (FetchResult, 
 
 	response, err := client.Do(request)
 	result.RedirectChain = append([]string{}, redirects...)
-	result.CheckedAt = time.Now().UTC()
 	if err != nil {
 		result.Error = classifyFetchError(err)
-		return result, nil
+		return finish(), nil
 	}
 	defer response.Body.Close()
 
@@ -85,20 +96,27 @@ func (f *HTTPFetcher) Fetch(ctx context.Context, fetchURL string) (FetchResult, 
 	result.ContentType = response.Header.Get("Content-Type")
 
 	if result.StatusCode != http.StatusOK || !isHTMLContentType(result.ContentType) {
-		return result, nil
+		return finish(), nil
 	}
 
 	body, tooLarge, err := readResponseBody(response.Body, f.maxResponseBytes)
 	if err != nil {
 		result.Error = "network_error"
-		return result, nil
+		return finish(), nil
 	}
 	if tooLarge {
 		result.Error = problemResponseTooLarge
-		return result, nil
+		return finish(), nil
 	}
 	result.Body = body
-	return result, nil
+	return finish(), nil
+}
+
+func (f *HTTPFetcher) nowUTC() time.Time {
+	if f.now != nil {
+		return f.now().UTC()
+	}
+	return time.Now().UTC()
 }
 
 func readResponseBody(body io.Reader, maxBytes int64) ([]byte, bool, error) {

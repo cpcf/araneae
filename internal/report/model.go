@@ -73,6 +73,7 @@ type FetchResult struct {
 	Error         string    `json:"error"`
 	RedirectChain []string  `json:"redirect_chain"`
 	CheckedAt     time.Time `json:"checked_at"`
+	DurationMS    int64     `json:"duration_ms"`
 }
 
 type SkippedLink struct {

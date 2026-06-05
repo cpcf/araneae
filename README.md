@@ -255,6 +255,21 @@ Each `links` entry represents one normalized navigable URL. Fragment variants ar
 }
 ```
 
+Each `fetches` entry records one fetched URL, including redirect metadata, when the check completed, and `duration_ms`, the elapsed fetch time in milliseconds:
+
+```json
+{
+  "url": "https://docs.example.com/install",
+  "status_code": 200,
+  "final_url": "https://docs.example.com/install",
+  "content_type": "text/html",
+  "error": "",
+  "redirect_chain": [],
+  "checked_at": "2026-05-28T15:04:47Z",
+  "duration_ms": 128
+}
+```
+
 Problem values include:
 
 - `http_status`: a received HTTP status other than 200.
