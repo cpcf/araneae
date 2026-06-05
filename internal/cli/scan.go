@@ -25,6 +25,7 @@ type scanOptions struct {
 	maxResponseBytes int64
 	retries          int
 	retryBackoff     time.Duration
+	headers          []requestHeader
 	allowHosts       []string
 	pathPrefix       string
 	localRoot        string
@@ -44,6 +45,46 @@ func (s *stringSliceValue) Set(v string) error {
 	return nil
 }
 
+type requestHeader struct {
+	Name  string
+	Value string
+}
+
+type headerValue []requestHeader
+
+func (h *headerValue) String() string {
+	parts := make([]string, 0, len(*h))
+	for _, header := range *h {
+		parts = append(parts, header.Name+": "+header.Value)
+	}
+	return strings.Join(parts, ",")
+}
+
+func (h *headerValue) Set(v string) error {
+	header, err := parseRequestHeader(v)
+	if err != nil {
+		return err
+	}
+	*h = append(*h, header)
+	return nil
+}
+
+func parseRequestHeader(raw string) (requestHeader, error) {
+	name, value, ok := strings.Cut(raw, ":")
+	if !ok {
+		return requestHeader{}, fmt.Errorf("header must be in Name: value form")
+	}
+	if strings.ContainsAny(name, "\r\n") || strings.ContainsAny(value, "\r\n") {
+		return requestHeader{}, fmt.Errorf("header name and value must not contain newlines")
+	}
+	name = strings.TrimSpace(name)
+	value = strings.TrimSpace(value)
+	if name == "" {
+		return requestHeader{}, fmt.Errorf("header name must not be empty")
+	}
+	return requestHeader{Name: name, Value: value}, nil
+}
+
 func ParseScanArgs(args []string) (scanOptions, error) {
 	const cmd = "scan"
 	const defaultMaxResponseBytes int64 = 5 * 1024 * 1024
@@ -53,6 +94,7 @@ func ParseScanArgs(args []string) (scanOptions, error) {
 
 	var opts scanOptions
 	var allowHosts stringSliceValue
+	var headers headerValue
 	fs.StringVar(&opts.out, "out", "araneae-report.json", "output report path")
 	fs.IntVar(&opts.maxPages, "max-pages", 500, "maximum checked same-site fetch URLs")
 	fs.DurationVar(&opts.timeout, "timeout", 15*time.Second, "per-request timeout")
@@ -61,6 +103,7 @@ func ParseScanArgs(args []string) (scanOptions, error) {
 	fs.Int64Var(&opts.maxResponseBytes, "max-response-bytes", defaultMaxResponseBytes, "maximum HTML response body bytes to read; 0 means unlimited")
 	fs.IntVar(&opts.retries, "retries", 0, "retry count for transient fetch failures; 0 disables retries")
 	fs.DurationVar(&opts.retryBackoff, "retry-backoff", 500*time.Millisecond, "delay between retry attempts")
+	fs.Var(&headers, "header", "HTTP request header in 'Name: value' form; can be repeated")
 	fs.Var(&allowHosts, "allow-host", "additional exact origins allowed for crawl")
 	fs.StringVar(&opts.pathPrefix, "path-prefix", "", "optional path prefix restriction")
 	fs.StringVar(&opts.localRoot, "local-root", "", "local static site root to seed crawl with every HTML page")
@@ -77,6 +120,7 @@ func ParseScanArgs(args []string) (scanOptions, error) {
 	}
 
 	opts.allowHosts = append(opts.allowHosts, allowHosts...)
+	opts.headers = append(opts.headers, headers...)
 	if fs.NArg() != 1 {
 		return opts, fmt.Errorf("%s: expected <entry-url>", cmd)
 	}

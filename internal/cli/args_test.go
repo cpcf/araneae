@@ -16,6 +16,8 @@ func TestParseScanArgsAcceptsFlagsAfterEntryURL(t *testing.T) {
 		"--max-response-bytes", "123456",
 		"--retries", "2",
 		"--retry-backoff", "750ms",
+		"--header", "Authorization: Bearer token",
+		"--header", "X-Preview: true",
 		"--allow-host", "https://www.example.com",
 		"--path-prefix", "/docs/",
 		"--local-root", "public",
@@ -53,6 +55,15 @@ func TestParseScanArgsAcceptsFlagsAfterEntryURL(t *testing.T) {
 	}
 	if opts.retryBackoff != 750*time.Millisecond {
 		t.Fatalf("retryBackoff = %s", opts.retryBackoff)
+	}
+	if len(opts.headers) != 2 {
+		t.Fatalf("headers = %#v; want 2", opts.headers)
+	}
+	if opts.headers[0] != (requestHeader{Name: "Authorization", Value: "Bearer token"}) {
+		t.Fatalf("first header = %#v", opts.headers[0])
+	}
+	if opts.headers[1] != (requestHeader{Name: "X-Preview", Value: "true"}) {
+		t.Fatalf("second header = %#v", opts.headers[1])
 	}
 	if len(opts.allowHosts) != 1 || opts.allowHosts[0] != "https://www.example.com" {
 		t.Fatalf("allowHosts = %#v", opts.allowHosts)
@@ -139,6 +150,49 @@ func TestParseScanArgsRejectsNegativeRetryBackoff(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("ParseScanArgs() error = nil; want error")
+	}
+}
+
+func TestParseScanArgsRejectsMalformedHeader(t *testing.T) {
+	_, err := ParseScanArgs([]string{
+		"https://docs.example.com/",
+		"--header", "Authorization Bearer token",
+	})
+	if err == nil {
+		t.Fatal("ParseScanArgs() error = nil; want error")
+	}
+}
+
+func TestParseScanArgsRejectsEmptyHeaderName(t *testing.T) {
+	_, err := ParseScanArgs([]string{
+		"https://docs.example.com/",
+		"--header", ": value",
+	})
+	if err == nil {
+		t.Fatal("ParseScanArgs() error = nil; want error")
+	}
+}
+
+func TestParseScanArgsRejectsHeaderNewlines(t *testing.T) {
+	tests := []struct {
+		name   string
+		header string
+	}{
+		{name: "name newline", header: "Bad\nName: value"},
+		{name: "value newline", header: "X-Test: first\nsecond"},
+		{name: "value carriage return", header: "X-Test: first\rsecond"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseScanArgs([]string{
+				"https://docs.example.com/",
+				"--header", tt.header,
+			})
+			if err == nil {
+				t.Fatal("ParseScanArgs() error = nil; want error")
+			}
+		})
 	}
 }
 
