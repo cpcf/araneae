@@ -83,10 +83,10 @@ func inlineFlagValue(arg string) string {
 
 func followsHeaderValue(args []string, index int) bool {
 	if index >= 2 && flagName(args[index-2]) == "header" {
-		return true
+		return strings.HasSuffix(strings.TrimSpace(args[index-1]), ":")
 	}
 	if index >= 1 && looksLikeFlag(args[index-1]) && flagName(args[index-1]) == "header" && strings.Contains(args[index-1], "=") {
-		return true
+		return strings.HasSuffix(strings.TrimSpace(inlineFlagValue(args[index-1])), ":")
 	}
 	return false
 }

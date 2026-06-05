@@ -265,6 +265,45 @@ func TestParseScanArgsRejectsSplitHeaderWithoutLeakingValue(t *testing.T) {
 	}
 }
 
+func TestParseScanArgsReportsUnknownFlagAfterValidHeader(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "separate",
+			args: []string{
+				"https://docs.example.com/",
+				"--header", "X-Test: ok",
+				"--bad",
+			},
+		},
+		{
+			name: "inline",
+			args: []string{
+				"https://docs.example.com/",
+				"--header=X-Test: ok",
+				"--bad",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseScanArgs(tt.args)
+			if err == nil {
+				t.Fatal("ParseScanArgs() error = nil; want error")
+			}
+			if !strings.Contains(err.Error(), "flag provided but not defined: -bad") {
+				t.Fatalf("error = %q; want unknown flag error", err)
+			}
+			if strings.Contains(err.Error(), "quote the full header value") {
+				t.Fatalf("error %q reports valid header as split", err)
+			}
+		})
+	}
+}
+
 func TestParseScanArgsAcceptsEmptyHeaderAroundEntryURL(t *testing.T) {
 	tests := []struct {
 		name string
