@@ -47,25 +47,6 @@ func (s *stringSliceValue) Set(v string) error {
 
 type requestHeader = crawl.RequestHeader
 
-type headerValue []requestHeader
-
-func (h *headerValue) String() string {
-	parts := make([]string, 0, len(*h))
-	for _, header := range *h {
-		parts = append(parts, header.Name+": "+header.Value)
-	}
-	return strings.Join(parts, ",")
-}
-
-func (h *headerValue) Set(v string) error {
-	header, err := parseRequestHeader(v)
-	if err != nil {
-		return err
-	}
-	*h = append(*h, header)
-	return nil
-}
-
 func parseRequestHeader(raw string) (requestHeader, error) {
 	name, value, ok := strings.Cut(raw, ":")
 	if !ok {
@@ -79,7 +60,46 @@ func parseRequestHeader(raw string) (requestHeader, error) {
 	if name == "" {
 		return requestHeader{}, fmt.Errorf("header name must not be empty")
 	}
+	if !validHeaderFieldName(name) {
+		return requestHeader{}, fmt.Errorf("header name contains invalid characters")
+	}
+	if !validHeaderFieldValue(value) {
+		return requestHeader{}, fmt.Errorf("header value contains invalid characters")
+	}
 	return requestHeader{Name: name, Value: value}, nil
+}
+
+func validHeaderFieldName(name string) bool {
+	for _, r := range name {
+		if r > 127 || !strings.ContainsRune("!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", r) {
+			return false
+		}
+	}
+	return true
+}
+
+func validHeaderFieldValue(value string) bool {
+	for _, r := range value {
+		if r == '\t' {
+			continue
+		}
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
+func parseRequestHeaders(raw []string) ([]requestHeader, error) {
+	headers := make([]requestHeader, 0, len(raw))
+	for i, value := range raw {
+		header, err := parseRequestHeader(value)
+		if err != nil {
+			return nil, fmt.Errorf("--header %d: %w", i+1, err)
+		}
+		headers = append(headers, header)
+	}
+	return headers, nil
 }
 
 func ParseScanArgs(args []string) (scanOptions, error) {
@@ -91,7 +111,7 @@ func ParseScanArgs(args []string) (scanOptions, error) {
 
 	var opts scanOptions
 	var allowHosts stringSliceValue
-	var headers headerValue
+	var rawHeaders stringSliceValue
 	fs.StringVar(&opts.out, "out", "araneae-report.json", "output report path")
 	fs.IntVar(&opts.maxPages, "max-pages", 500, "maximum checked same-site fetch URLs")
 	fs.DurationVar(&opts.timeout, "timeout", 15*time.Second, "per-request timeout")
@@ -100,7 +120,7 @@ func ParseScanArgs(args []string) (scanOptions, error) {
 	fs.Int64Var(&opts.maxResponseBytes, "max-response-bytes", defaultMaxResponseBytes, "maximum HTML response body bytes to read; 0 means unlimited")
 	fs.IntVar(&opts.retries, "retries", 0, "retry count for transient fetch failures; 0 disables retries")
 	fs.DurationVar(&opts.retryBackoff, "retry-backoff", 500*time.Millisecond, "delay between retry attempts")
-	fs.Var(&headers, "header", "HTTP request header in 'Name: value' form; can be repeated")
+	fs.Var(&rawHeaders, "header", "HTTP request header in 'Name: value' form; can be repeated")
 	fs.Var(&allowHosts, "allow-host", "additional exact origins allowed for crawl")
 	fs.StringVar(&opts.pathPrefix, "path-prefix", "", "optional path prefix restriction")
 	fs.StringVar(&opts.localRoot, "local-root", "", "local static site root to seed crawl with every HTML page")
@@ -117,7 +137,10 @@ func ParseScanArgs(args []string) (scanOptions, error) {
 	}
 
 	opts.allowHosts = append(opts.allowHosts, allowHosts...)
-	opts.headers = append(opts.headers, headers...)
+	opts.headers, err = parseRequestHeaders(rawHeaders)
+	if err != nil {
+		return opts, fmt.Errorf("%s: %w", cmd, err)
+	}
 	if fs.NArg() != 1 {
 		return opts, fmt.Errorf("%s: expected <entry-url>", cmd)
 	}

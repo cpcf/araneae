@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -154,12 +155,16 @@ func TestParseScanArgsRejectsNegativeRetryBackoff(t *testing.T) {
 }
 
 func TestParseScanArgsRejectsMalformedHeader(t *testing.T) {
+	secret := "super-secret-token"
 	_, err := ParseScanArgs([]string{
 		"https://docs.example.com/",
-		"--header", "Authorization Bearer token",
+		"--header", "Authorization Bearer " + secret,
 	})
 	if err == nil {
 		t.Fatal("ParseScanArgs() error = nil; want error")
+	}
+	if strings.Contains(err.Error(), secret) || strings.Contains(err.Error(), "Authorization") {
+		t.Fatalf("error %q leaks header input", err)
 	}
 }
 
@@ -181,6 +186,31 @@ func TestParseScanArgsRejectsHeaderNewlines(t *testing.T) {
 		{name: "name newline", header: "Bad\nName: value"},
 		{name: "value newline", header: "X-Test: first\nsecond"},
 		{name: "value carriage return", header: "X-Test: first\rsecond"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseScanArgs([]string{
+				"https://docs.example.com/",
+				"--header", tt.header,
+			})
+			if err == nil {
+				t.Fatal("ParseScanArgs() error = nil; want error")
+			}
+		})
+	}
+}
+
+func TestParseScanArgsRejectsInvalidHeaderSyntax(t *testing.T) {
+	tests := []struct {
+		name   string
+		header string
+	}{
+		{name: "space in name", header: "Bad Name: value"},
+		{name: "invalid symbol in name", header: "X-Test@: value"},
+		{name: "unicode name", header: "X-Cafe\u00e9: value"},
+		{name: "control value", header: "X-Test: value\x01"},
+		{name: "delete value", header: "X-Test: value\x7f"},
 	}
 
 	for _, tt := range tests {
