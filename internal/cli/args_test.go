@@ -321,6 +321,29 @@ func TestParseScanArgsRejectsEmptyHeaderName(t *testing.T) {
 	}
 }
 
+func TestParseScanArgsRejectsHostHeader(t *testing.T) {
+	secret := "preview.example.com"
+	tests := []string{
+		"Host: " + secret,
+		"host: " + secret,
+	}
+
+	for _, header := range tests {
+		t.Run(header[:strings.Index(header, ":")], func(t *testing.T) {
+			_, err := ParseScanArgs([]string{
+				"https://docs.example.com/",
+				"--header", header,
+			})
+			if err == nil {
+				t.Fatal("ParseScanArgs() error = nil; want error")
+			}
+			if strings.Contains(err.Error(), secret) {
+				t.Fatalf("error %q leaks Host header value", err)
+			}
+		})
+	}
+}
+
 func TestParseScanArgsRejectsHeaderNewlines(t *testing.T) {
 	tests := []struct {
 		name   string

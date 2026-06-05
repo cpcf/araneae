@@ -69,6 +69,9 @@ func parseRequestHeader(raw string) (requestHeader, error) {
 	if !validHeaderFieldName(name) {
 		return requestHeader{}, fmt.Errorf("header name contains invalid characters")
 	}
+	if strings.EqualFold(name, "Host") {
+		return requestHeader{}, fmt.Errorf("Host header is not supported")
+	}
 	return requestHeader{Name: name, Value: value}, nil
 }
 
