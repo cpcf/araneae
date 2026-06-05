@@ -55,6 +55,12 @@ func parseRequestHeader(raw string) (requestHeader, error) {
 	if strings.ContainsAny(name, "\r\n") || strings.ContainsAny(value, "\r\n") {
 		return requestHeader{}, fmt.Errorf("header name and value must not contain newlines")
 	}
+	if !validRawHeaderName(name) {
+		return requestHeader{}, fmt.Errorf("header name contains invalid characters")
+	}
+	if !validHeaderFieldValue(value) {
+		return requestHeader{}, fmt.Errorf("header value contains invalid characters")
+	}
 	name = strings.TrimSpace(name)
 	value = strings.TrimSpace(value)
 	if name == "" {
@@ -63,10 +69,19 @@ func parseRequestHeader(raw string) (requestHeader, error) {
 	if !validHeaderFieldName(name) {
 		return requestHeader{}, fmt.Errorf("header name contains invalid characters")
 	}
-	if !validHeaderFieldValue(value) {
-		return requestHeader{}, fmt.Errorf("header value contains invalid characters")
-	}
 	return requestHeader{Name: name, Value: value}, nil
+}
+
+func validRawHeaderName(name string) bool {
+	for _, r := range name {
+		if r == ' ' {
+			continue
+		}
+		if r < 0x21 || r > 0x7e {
+			return false
+		}
+	}
+	return true
 }
 
 func validHeaderFieldName(name string) bool {
@@ -148,7 +163,7 @@ func ParseScanArgs(args []string) (scanOptions, error) {
 
 	parsed, err := url.Parse(opts.entryURL)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return opts, fmt.Errorf("%s: invalid entry URL %q", cmd, opts.entryURL)
+		return opts, fmt.Errorf("%s: invalid entry URL", cmd)
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return opts, fmt.Errorf("%s: unsupported entry scheme %q", cmd, parsed.Scheme)

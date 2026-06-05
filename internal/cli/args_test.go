@@ -190,6 +190,13 @@ func TestParseScanArgsRejectsSplitHeaderWithoutLeakingValue(t *testing.T) {
 				"--header", "Authorization:", "--timeout=super-secret-timeout",
 			},
 		},
+		{
+			name:   "positional token",
+			secret: "demo-token",
+			args: []string{
+				"--header", "Authorization:", "demo-token",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -248,6 +255,10 @@ func TestParseScanArgsRejectsInvalidHeaderSyntax(t *testing.T) {
 		{name: "unicode name", header: "X-Cafe\u00e9: value"},
 		{name: "control value", header: "X-Test: value\x01"},
 		{name: "delete value", header: "X-Test: value\x7f"},
+		{name: "leading vertical tab value", header: "X-Test: \vvalue"},
+		{name: "trailing vertical tab value", header: "X-Test: value\v"},
+		{name: "leading vertical tab name", header: "\vX-Test: value"},
+		{name: "trailing vertical tab name", header: "X-Test\v: value"},
 	}
 
 	for _, tt := range tests {
