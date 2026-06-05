@@ -28,6 +28,7 @@ type ReportLimits struct {
 	RequestTimeoutSec    int     `json:"request_timeout_seconds"`
 	MaxConcurrency       int     `json:"max_concurrency"`
 	MaxRequestsPerSecond float64 `json:"max_requests_per_second"`
+	MaxResponseBytes     int64   `json:"max_response_bytes"`
 }
 
 type ReportSummary struct {

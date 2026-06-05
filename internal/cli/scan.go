@@ -16,18 +16,19 @@ import (
 )
 
 type scanOptions struct {
-	entryURL     string
-	out          string
-	maxPages     int
-	timeout      time.Duration
-	concurrency  int
-	maxReqPerSec float64
-	allowHosts   []string
-	pathPrefix   string
-	localRoot    string
-	userAgent    string
-	failOnDead   bool
-	failOnNon200 bool
+	entryURL         string
+	out              string
+	maxPages         int
+	timeout          time.Duration
+	concurrency      int
+	maxReqPerSec     float64
+	maxResponseBytes int64
+	allowHosts       []string
+	pathPrefix       string
+	localRoot        string
+	userAgent        string
+	failOnDead       bool
+	failOnNon200     bool
 }
 
 type stringSliceValue []string
@@ -43,6 +44,7 @@ func (s *stringSliceValue) Set(v string) error {
 
 func ParseScanArgs(args []string) (scanOptions, error) {
 	const cmd = "scan"
+	const defaultMaxResponseBytes int64 = 5 * 1024 * 1024
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
@@ -53,6 +55,7 @@ func ParseScanArgs(args []string) (scanOptions, error) {
 	fs.DurationVar(&opts.timeout, "timeout", 15*time.Second, "per-request timeout")
 	fs.IntVar(&opts.concurrency, "concurrency", 8, "fetch concurrency")
 	fs.Float64Var(&opts.maxReqPerSec, "max-requests-per-second", 0, "maximum request starts per second; 0 means unlimited")
+	fs.Int64Var(&opts.maxResponseBytes, "max-response-bytes", defaultMaxResponseBytes, "maximum HTML response body bytes to read; 0 means unlimited")
 	fs.Var(&allowHosts, "allow-host", "additional exact origins allowed for crawl")
 	fs.StringVar(&opts.pathPrefix, "path-prefix", "", "optional path prefix restriction")
 	fs.StringVar(&opts.localRoot, "local-root", "", "local static site root to seed crawl with every HTML page")
@@ -84,6 +87,9 @@ func ParseScanArgs(args []string) (scanOptions, error) {
 	if opts.maxReqPerSec < 0 || math.IsNaN(opts.maxReqPerSec) || math.IsInf(opts.maxReqPerSec, 0) {
 		return opts, fmt.Errorf("%s: --max-requests-per-second must be a finite value >= 0", cmd)
 	}
+	if opts.maxResponseBytes < 0 {
+		return opts, fmt.Errorf("%s: --max-response-bytes must be >= 0", cmd)
+	}
 
 	return opts, nil
 }
@@ -100,6 +106,7 @@ func RunScan(args []string) error {
 		Timeout:              opts.timeout,
 		Concurrency:          opts.concurrency,
 		MaxRequestsPerSecond: opts.maxReqPerSec,
+		MaxResponseBytes:     opts.maxResponseBytes,
 		AllowHosts:           opts.allowHosts,
 		PathPrefix:           opts.pathPrefix,
 		LocalRoot:            opts.localRoot,

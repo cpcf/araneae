@@ -21,6 +21,7 @@ type ScanOptions struct {
 	Timeout              time.Duration
 	Concurrency          int
 	MaxRequestsPerSecond float64
+	MaxResponseBytes     int64
 	AllowHosts           []string
 	PathPrefix           string
 	LocalRoot            string
@@ -65,7 +66,7 @@ func Run(ctx context.Context, opts ScanOptions) (report.Report, error) {
 func NewCrawler(opts ScanOptions) *Crawler {
 	fetcher := opts.Fetcher
 	if fetcher == nil {
-		fetcher = NewHTTPFetcher(opts.Timeout, opts.UserAgent)
+		fetcher = NewHTTPFetcher(opts.Timeout, opts.UserAgent, opts.MaxResponseBytes)
 	}
 	parser := opts.Parser
 	if parser == nil {
@@ -270,8 +271,7 @@ func (c *Crawler) Run(ctx context.Context) (report.Report, error) {
 	processFetch := func(fetch FetchResult) {
 		recordFetch(fetch)
 		sourceURL := firstNonEmpty(fetch.FinalURL, fetch.URL)
-		isHTML := strings.Contains(strings.ToLower(fetch.ContentType), "text/html")
-		if fetch.Error != "" || fetch.StatusCode != 200 || !isHTML {
+		if fetch.Error != "" || fetch.StatusCode != 200 || !isHTMLContentType(fetch.ContentType) {
 			return
 		}
 		parsed, err := c.parser.Parse(sourceURL, bytes.NewReader(fetch.Body))
@@ -459,6 +459,7 @@ func (c *Crawler) Run(ctx context.Context) (report.Report, error) {
 			RequestTimeoutSec:    int(c.opts.Timeout.Seconds()),
 			MaxConcurrency:       c.opts.Concurrency,
 			MaxRequestsPerSecond: c.opts.MaxRequestsPerSecond,
+			MaxResponseBytes:     c.opts.MaxResponseBytes,
 		},
 		Summary:      summary,
 		Links:        reportLinks,
@@ -497,8 +498,10 @@ func totalLinkOccurrences(links map[string]*linkState) int {
 
 func linkProblemAndHealth(link *linkState, fetch report.FetchResult, fragmentsByFetch map[string]map[string]struct{}) (problem string, dead bool, non200 bool, ok bool) {
 	if fetch.Error != "" {
-		dead = true
-		return normalizeProblem(fetch.Error), true, false, false
+		if fetch.StatusCode != 0 && fetch.StatusCode != 200 {
+			non200 = true
+		}
+		return normalizeProblem(fetch.Error), true, non200, false
 	}
 	if fetch.StatusCode != 200 {
 		non200 = true
@@ -508,7 +511,7 @@ func linkProblemAndHealth(link *linkState, fetch report.FetchResult, fragmentsBy
 		}
 		return problem, dead, non200, false
 	}
-	if link.Fragment != "" && strings.Contains(strings.ToLower(fetch.ContentType), "text/html") {
+	if link.Fragment != "" && isHTMLContentType(fetch.ContentType) {
 		fragments := fragmentsByFetch[fetch.URL]
 		if _, ok := fragments[link.Fragment]; !ok {
 			return "missing_fragment", true, false, false
@@ -529,6 +532,8 @@ func normalizeProblem(err string) string {
 		return "too_many_redirects"
 	case strings.Contains(err, "parsing_error"):
 		return "parsing_error"
+	case strings.Contains(err, problemResponseTooLarge):
+		return problemResponseTooLarge
 	case strings.Contains(err, "network_error"):
 		return "network_error"
 	case strings.Contains(err, "redirect"):

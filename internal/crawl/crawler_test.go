@@ -272,6 +272,116 @@ func TestSequentialCrawlerParsesOnlyHTML(t *testing.T) {
 	}
 }
 
+func TestSequentialCrawlerReportsTooLargeHTMLResponseAsDead(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(`<a href="/large">Large</a>`))
+		case "/large":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(strings.Repeat("x", 65)))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	reportData, err := Run(context.Background(), ScanOptions{
+		EntryURL:         server.URL + "/",
+		MaxPages:         10,
+		Timeout:          2 * time.Second,
+		UserAgent:        "araneae-test",
+		Concurrency:      1,
+		MaxResponseBytes: 64,
+	})
+	if err != nil {
+		t.Fatalf("run scanner: %v", err)
+	}
+
+	if reportData.Limits.MaxResponseBytes != 64 {
+		t.Fatalf("max response bytes = %d; want 64", reportData.Limits.MaxResponseBytes)
+	}
+	if reportData.Summary.DeadLinks != 1 {
+		t.Fatalf("dead links = %d; want 1", reportData.Summary.DeadLinks)
+	}
+	if reportData.Summary.OKLinks != 0 {
+		t.Fatalf("ok links = %d; want 0", reportData.Summary.OKLinks)
+	}
+	if reportData.Summary.Non200Links != 0 {
+		t.Fatalf("non-200 links = %d; want 0", reportData.Summary.Non200Links)
+	}
+
+	link := findLinkByURL(reportData, server.URL+"/large")
+	if link == nil {
+		t.Fatalf("large link not found")
+	}
+	if !link.Dead || link.OK || link.Non200 {
+		t.Fatalf("link health = dead:%v ok:%v non200:%v; want dead only", link.Dead, link.OK, link.Non200)
+	}
+	if link.Problem != problemResponseTooLarge || link.Error != problemResponseTooLarge {
+		t.Fatalf("link problem/error = %q/%q; want %q", link.Problem, link.Error, problemResponseTooLarge)
+	}
+
+	fetch := findFetchByURL(reportData, server.URL+"/large")
+	if fetch == nil {
+		t.Fatalf("large fetch not found")
+	}
+	if fetch.Error != problemResponseTooLarge {
+		t.Fatalf("fetch error = %q; want %q", fetch.Error, problemResponseTooLarge)
+	}
+}
+
+func TestSequentialCrawlerRecordsNonHTMLStatusWithoutParsing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(`<a href="/file.pdf">PDF</a><a href="/download.bin">Download</a>`))
+		case "/file.pdf":
+			w.Header().Set("Content-Type", "application/pdf")
+			_, _ = w.Write([]byte(`<a href="/ignored">ignored</a>`))
+		case "/download.bin":
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(strings.Repeat("x", 128)))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	reportData := runScan(t, server.URL+"/", 10, 1)
+
+	pdf := findLinkByURL(reportData, server.URL+"/file.pdf")
+	if pdf == nil {
+		t.Fatalf("pdf link not found")
+	}
+	if !pdf.OK || pdf.Dead || pdf.Non200 {
+		t.Fatalf("pdf health = ok:%v dead:%v non200:%v; want ok only", pdf.OK, pdf.Dead, pdf.Non200)
+	}
+	if pdf.ContentType != "application/pdf" {
+		t.Fatalf("pdf content type = %q", pdf.ContentType)
+	}
+
+	download := findLinkByURL(reportData, server.URL+"/download.bin")
+	if download == nil {
+		t.Fatalf("download link not found")
+	}
+	if download.OK || download.Dead || !download.Non200 || download.Problem != "http_status" {
+		t.Fatalf("download health = ok:%v dead:%v non200:%v problem:%q; want non-200 http_status", download.OK, download.Dead, download.Non200, download.Problem)
+	}
+	if download.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("download status = %d; want 500", download.StatusCode)
+	}
+	if download.ContentType != "application/octet-stream" {
+		t.Fatalf("download content type = %q", download.ContentType)
+	}
+	if findLinkByURL(reportData, server.URL+"/ignored") != nil {
+		t.Fatalf("did parse anchors from non-HTML response")
+	}
+}
+
 func TestCrawlerSeedsLocalRootHTMLPages(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, filepath.Join(root, "index.html"), "<p>home</p>")

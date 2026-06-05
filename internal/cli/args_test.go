@@ -13,6 +13,7 @@ func TestParseScanArgsAcceptsFlagsAfterEntryURL(t *testing.T) {
 		"--timeout", "3s",
 		"--concurrency", "2",
 		"--max-requests-per-second", "4.5",
+		"--max-response-bytes", "123456",
 		"--allow-host", "https://www.example.com",
 		"--path-prefix", "/docs/",
 		"--local-root", "public",
@@ -42,6 +43,9 @@ func TestParseScanArgsAcceptsFlagsAfterEntryURL(t *testing.T) {
 	if opts.maxReqPerSec != 4.5 {
 		t.Fatalf("maxReqPerSec = %f", opts.maxReqPerSec)
 	}
+	if opts.maxResponseBytes != 123456 {
+		t.Fatalf("maxResponseBytes = %d", opts.maxResponseBytes)
+	}
 	if len(opts.allowHosts) != 1 || opts.allowHosts[0] != "https://www.example.com" {
 		t.Fatalf("allowHosts = %#v", opts.allowHosts)
 	}
@@ -56,6 +60,41 @@ func TestParseScanArgsAcceptsFlagsAfterEntryURL(t *testing.T) {
 	}
 	if !opts.failOnDead || !opts.failOnNon200 {
 		t.Fatalf("fail flags = %t %t", opts.failOnDead, opts.failOnNon200)
+	}
+}
+
+func TestParseScanArgsDefaultsMaxResponseBytes(t *testing.T) {
+	opts, err := ParseScanArgs([]string{"https://docs.example.com/"})
+	if err != nil {
+		t.Fatalf("ParseScanArgs() error = %v", err)
+	}
+
+	if opts.maxResponseBytes != 5*1024*1024 {
+		t.Fatalf("maxResponseBytes = %d; want 5242880", opts.maxResponseBytes)
+	}
+}
+
+func TestParseScanArgsAcceptsUnlimitedMaxResponseBytes(t *testing.T) {
+	opts, err := ParseScanArgs([]string{
+		"https://docs.example.com/",
+		"--max-response-bytes", "0",
+	})
+	if err != nil {
+		t.Fatalf("ParseScanArgs() error = %v", err)
+	}
+
+	if opts.maxResponseBytes != 0 {
+		t.Fatalf("maxResponseBytes = %d; want 0", opts.maxResponseBytes)
+	}
+}
+
+func TestParseScanArgsRejectsNegativeMaxResponseBytes(t *testing.T) {
+	_, err := ParseScanArgs([]string{
+		"https://docs.example.com/",
+		"--max-response-bytes", "-1",
+	})
+	if err == nil {
+		t.Fatal("ParseScanArgs() error = nil; want error")
 	}
 }
 

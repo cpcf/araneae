@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -28,15 +29,19 @@ type Fetcher interface {
 }
 
 type HTTPFetcher struct {
-	client    *http.Client
-	userAgent string
+	client           *http.Client
+	userAgent        string
+	maxResponseBytes int64
 }
 
 var errTooManyRedirects = errors.New("too many redirects")
 
-func NewHTTPFetcher(timeout time.Duration, userAgent string) *HTTPFetcher {
+const problemResponseTooLarge = "response_too_large"
+
+func NewHTTPFetcher(timeout time.Duration, userAgent string, maxResponseBytes int64) *HTTPFetcher {
 	return &HTTPFetcher{
-		userAgent: userAgent,
+		userAgent:        userAgent,
+		maxResponseBytes: maxResponseBytes,
 		client: &http.Client{
 			Timeout: timeout,
 		},
@@ -75,16 +80,49 @@ func (f *HTTPFetcher) Fetch(ctx context.Context, fetchURL string) (FetchResult, 
 	}
 	defer response.Body.Close()
 
-	body, err := io.ReadAll(response.Body)
+	result.StatusCode = response.StatusCode
+	result.FinalURL = response.Request.URL.String()
+	result.ContentType = response.Header.Get("Content-Type")
+
+	if result.StatusCode != http.StatusOK || !isHTMLContentType(result.ContentType) {
+		return result, nil
+	}
+
+	body, tooLarge, err := readResponseBody(response.Body, f.maxResponseBytes)
 	if err != nil {
 		result.Error = "network_error"
 		return result, nil
 	}
-	result.StatusCode = response.StatusCode
-	result.FinalURL = response.Request.URL.String()
-	result.ContentType = response.Header.Get("Content-Type")
+	if tooLarge {
+		result.Error = problemResponseTooLarge
+		return result, nil
+	}
 	result.Body = body
 	return result, nil
+}
+
+func readResponseBody(body io.Reader, maxBytes int64) ([]byte, bool, error) {
+	if maxBytes <= 0 {
+		read, err := io.ReadAll(body)
+		return read, false, err
+	}
+
+	read, err := io.ReadAll(io.LimitReader(body, maxBytes+1))
+	if err != nil {
+		return nil, false, err
+	}
+	if int64(len(read)) > maxBytes {
+		return nil, true, nil
+	}
+	return read, false, nil
+}
+
+func isHTMLContentType(contentType string) bool {
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err == nil {
+		return strings.EqualFold(mediaType, "text/html")
+	}
+	return strings.Contains(strings.ToLower(contentType), "text/html")
 }
 
 func classifyFetchError(err error) string {
