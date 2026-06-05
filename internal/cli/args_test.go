@@ -205,6 +205,14 @@ func TestParseScanArgsRejectsSplitHeaderWithoutLeakingValue(t *testing.T) {
 				"--header", "Authorization:", "Bearer", "--timeout=super-secret-timeout",
 			},
 		},
+		{
+			name:   "inline multi-token value before defined flag",
+			secret: "inline-secret-timeout",
+			args: []string{
+				"https://docs.example.com/",
+				"--header=Authorization:", "Bearer", "--timeout=inline-secret-timeout",
+			},
+		},
 	}
 
 	for _, tt := range tests {

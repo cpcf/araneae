@@ -45,6 +45,9 @@ func interspersePositionals(fs *flag.FlagSet, args []string) ([]string, error) {
 
 		flags = append(flags, arg)
 		if strings.Contains(arg, "=") {
+			if name == "header" && looksLikeSplitHeaderValue(inlineFlagValue(arg), args, i+1, len(positionals) > 0) {
+				return nil, fmt.Errorf("--header value looks split; quote the full header value")
+			}
 			continue
 		}
 		if bf, ok := defined.Value.(boolFlag); ok && bf.IsBoolFlag() {
@@ -71,6 +74,11 @@ func flagName(arg string) string {
 	trimmed := strings.TrimLeft(arg, "-")
 	name, _, _ := strings.Cut(trimmed, "=")
 	return name
+}
+
+func inlineFlagValue(arg string) string {
+	_, value, _ := strings.Cut(arg, "=")
+	return value
 }
 
 func followsHeaderValue(args []string, index int) bool {
