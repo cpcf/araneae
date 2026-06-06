@@ -207,8 +207,15 @@ func ParseScanArgs(args []string) (scanOptions, error) {
 }
 
 func RunScan(args []string) error {
+	return runScanCommand(args, os.Stdout)
+}
+
+func runScanCommand(args []string, stdout io.Writer) error {
 	opts, err := ParseScanArgs(args)
 	if err != nil {
+		if helpRequested(err) {
+			return writeHelp(stdout, scanUsage())
+		}
 		return err
 	}
 
@@ -228,6 +235,19 @@ func RunScan(args []string) error {
 	}
 
 	return nil
+}
+
+func scanUsage() string {
+	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	var opts scanOptions
+	var allowHosts stringSliceValue
+	var rawHeaders stringSliceValue
+	registerScanFlags(fs, &opts, &rawHeaders, &allowHosts)
+	fs.BoolVar(&opts.failOnDead, "fail-on-dead", false, "exit non-zero when dead links exist")
+	fs.BoolVar(&opts.failOnNon200, "fail-on-non-200", false, "exit non-zero when non-200 links exist")
+	return flagUsage("scan", "<entry-url>", fs)
 }
 
 func runScan(opts scanOptions) (report.Report, error) {

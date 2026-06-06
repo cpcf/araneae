@@ -47,11 +47,18 @@ func ParseCheckArgs(args []string) (checkOptions, error) {
 }
 
 func RunCheck(args []string) error {
+	return runCheckCommand(args, os.Stdout, os.Getenv)
+}
+
+func runCheckCommand(args []string, stdout io.Writer, getenv func(string) string) error {
 	opts, err := ParseCheckArgs(args)
 	if err != nil {
+		if helpRequested(err) {
+			return writeHelp(stdout, checkUsage())
+		}
 		return err
 	}
-	return runCheck(opts, os.Stdout, os.Getenv)
+	return runCheck(opts, stdout, getenv)
 }
 
 func runCheck(opts checkOptions, stdout io.Writer, getenv func(string) string) error {
@@ -110,4 +117,23 @@ func appendGithubStepSummary(path, markdown string) error {
 		}
 	}
 	return nil
+}
+
+func checkUsage() string {
+	fs := flag.NewFlagSet("check", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	var scan scanOptions
+	var allowHosts stringSliceValue
+	var rawHeaders stringSliceValue
+	var opts checkOptions
+	opts.summaryFormat = "text"
+	registerScanFlags(fs, &scan, &rawHeaders, &allowHosts)
+	fs.BoolVar(&opts.policy.FailOnDead, "fail-on-dead", false, "exit non-zero when dead links exist")
+	fs.BoolVar(&opts.policy.FailOnNon200, "fail-on-non-200", false, "exit non-zero when non-200 links exist")
+	fs.BoolVar(&opts.policy.FailOnTruncated, "fail-on-truncated", false, "exit non-zero when the scan hits --max-pages before visiting every queued URL")
+	fs.StringVar(&opts.summaryFormat, "summary", opts.summaryFormat, "summary format: text or markdown")
+	fs.BoolVar(&opts.ci, "ci", false, "enable CI conveniences such as default GitHub step summary output")
+	fs.StringVar(&opts.githubStepSummary, "github-step-summary", "", "path to append a GitHub step summary markdown report")
+	return flagUsage("check", "<entry-url>", fs)
 }
