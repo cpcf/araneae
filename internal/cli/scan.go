@@ -47,6 +47,13 @@ func (s *stringSliceValue) Set(v string) error {
 
 type requestHeader = crawl.RequestHeader
 
+const (
+	defaultMaxResponseBytes int64 = 5 * 1024 * 1024
+	maxRetries                    = 100
+)
+
+var crawlRun = crawl.Run
+
 func parseRequestHeader(raw string) (requestHeader, error) {
 	name, value, ok := strings.Cut(raw, ":")
 	if !ok {
@@ -120,16 +127,7 @@ func parseRequestHeaders(raw []string) ([]requestHeader, error) {
 	return headers, nil
 }
 
-func ParseScanArgs(args []string) (scanOptions, error) {
-	const cmd = "scan"
-	const defaultMaxResponseBytes int64 = 5 * 1024 * 1024
-	const maxRetries = 100
-	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-
-	var opts scanOptions
-	var allowHosts stringSliceValue
-	var rawHeaders stringSliceValue
+func registerScanFlags(fs *flag.FlagSet, opts *scanOptions, rawHeaders, allowHosts *stringSliceValue) {
 	fs.StringVar(&opts.out, "out", "araneae-report.json", "output report path")
 	fs.IntVar(&opts.maxPages, "max-pages", 500, "maximum checked same-site fetch URLs")
 	fs.DurationVar(&opts.timeout, "timeout", 15*time.Second, "per-request timeout")
@@ -138,13 +136,24 @@ func ParseScanArgs(args []string) (scanOptions, error) {
 	fs.Int64Var(&opts.maxResponseBytes, "max-response-bytes", defaultMaxResponseBytes, "maximum HTML response body bytes to read; 0 means unlimited")
 	fs.IntVar(&opts.retries, "retries", 0, "retry count for transient fetch failures; 0 disables retries")
 	fs.DurationVar(&opts.retryBackoff, "retry-backoff", 500*time.Millisecond, "delay between retry attempts")
-	fs.Var(&rawHeaders, "header", "HTTP request header in 'Name: value' form; can be repeated")
-	fs.Var(&allowHosts, "allow-host", "additional exact origins allowed for crawl")
+	fs.Var(rawHeaders, "header", "HTTP request header in 'Name: value' form; can be repeated")
+	fs.Var(allowHosts, "allow-host", "additional exact origins allowed for crawl")
 	fs.StringVar(&opts.pathPrefix, "path-prefix", "", "optional path prefix restriction")
 	fs.StringVar(&opts.localRoot, "local-root", "", "local static site root to seed crawl with every HTML page")
 	fs.StringVar(&opts.userAgent, "user-agent", "araneae/0.1", "user-agent string")
-	fs.BoolVar(&opts.failOnDead, "fail-on-dead", false, "exit non-zero when dead links exist")
-	fs.BoolVar(&opts.failOnNon200, "fail-on-non-200", false, "exit non-zero when non-200 links exist")
+}
+
+func parseScanCoreArgs(cmd string, args []string, registerExtra func(*flag.FlagSet, *scanOptions)) (scanOptions, error) {
+	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	var opts scanOptions
+	var allowHosts stringSliceValue
+	var rawHeaders stringSliceValue
+	registerScanFlags(fs, &opts, &rawHeaders, &allowHosts)
+	if registerExtra != nil {
+		registerExtra(fs, &opts)
+	}
 
 	orderedArgs, err := interspersePositionals(fs, args)
 	if err != nil {
@@ -190,13 +199,43 @@ func ParseScanArgs(args []string) (scanOptions, error) {
 	return opts, nil
 }
 
+func ParseScanArgs(args []string) (scanOptions, error) {
+	return parseScanCoreArgs("scan", args, func(fs *flag.FlagSet, opts *scanOptions) {
+		fs.BoolVar(&opts.failOnDead, "fail-on-dead", false, "exit non-zero when dead links exist")
+		fs.BoolVar(&opts.failOnNon200, "fail-on-non-200", false, "exit non-zero when non-200 links exist")
+	})
+}
+
 func RunScan(args []string) error {
 	opts, err := ParseScanArgs(args)
 	if err != nil {
 		return err
 	}
 
-	crawler := crawl.ScanOptions{
+	reportData, err := runScan(opts)
+	if err != nil {
+		return err
+	}
+	if err := writeReportFile(opts.out, reportData); err != nil {
+		return err
+	}
+
+	if opts.failOnDead && reportData.Summary.DeadLinks > 0 {
+		return fmt.Errorf("scan found dead links: %d", reportData.Summary.DeadLinks)
+	}
+	if opts.failOnNon200 && reportData.Summary.Non200Links > 0 {
+		return fmt.Errorf("scan found non-200 links: %d", reportData.Summary.Non200Links)
+	}
+
+	return nil
+}
+
+func runScan(opts scanOptions) (report.Report, error) {
+	return crawlRun(context.Background(), scanCrawlerOptions(opts))
+}
+
+func scanCrawlerOptions(opts scanOptions) crawl.ScanOptions {
+	return crawl.ScanOptions{
 		EntryURL:             opts.entryURL,
 		MaxPages:             opts.maxPages,
 		Timeout:              opts.timeout,
@@ -211,27 +250,14 @@ func RunScan(args []string) error {
 		LocalRoot:            opts.localRoot,
 		UserAgent:            opts.userAgent,
 	}
-	reportData, err := crawl.Run(context.Background(), crawler)
-	if err != nil {
-		return err
-	}
+}
 
-	outputFile, err := os.Create(opts.out)
+func writeReportFile(path string, reportData report.Report) error {
+	outputFile, err := os.Create(path)
 	if err != nil {
 		return err
 	}
 	defer outputFile.Close()
 
-	if err := report.Write(outputFile, reportData); err != nil {
-		return err
-	}
-
-	if opts.failOnDead && reportData.Summary.DeadLinks > 0 {
-		return fmt.Errorf("scan found dead links: %d", reportData.Summary.DeadLinks)
-	}
-	if opts.failOnNon200 && reportData.Summary.Non200Links > 0 {
-		return fmt.Errorf("scan found non-200 links: %d", reportData.Summary.Non200Links)
-	}
-
-	return nil
+	return report.Write(outputFile, reportData)
 }

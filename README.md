@@ -78,6 +78,16 @@ Run a scan:
 araneae scan https://docs.example.com/ --out report.json
 ```
 
+Run a CI check:
+
+```sh
+araneae check https://docs.example.com/ \
+  --out report.json \
+  --fail-on-dead \
+  --fail-on-non-200 \
+  --fail-on-truncated
+```
+
 Open the report in the local UI:
 
 ```sh
@@ -173,13 +183,64 @@ For large docs sites and private preview environments, keep `--max-response-byte
 
 Use retries only when the target environment has occasional transient failures, such as preview hosts behind cold caches or short deploy windows. Retries apply to network errors, timeouts, HTTP 429, and HTTP 5xx responses. They do not retry deterministic outcomes such as 404, 410, missing fragments, parsing errors, or HTML responses over `--max-response-bytes`.
 
+## Check Options
+
+```text
+araneae check <entry-url> [flags]
+```
+
+`check` runs the same crawl as `scan`, writes the same JSON report, prints a concise status summary, and exits non-zero when enabled policy flags fail.
+
+It reuses the scan flags above and adds:
+
+- `--fail-on-dead`: exit non-zero when dead links or missing fragments exist.
+- `--fail-on-non-200`: exit non-zero when any checked link returns a non-200 HTTP status.
+- `--fail-on-truncated`: exit non-zero when `--max-pages` prevents visiting every queued URL.
+- `--summary text`: summary format for stdout. Use `markdown` for a Markdown table with top problems.
+- `--ci`: enable CI conveniences, including default GitHub step summary output when `$GITHUB_STEP_SUMMARY` is set.
+- `--github-step-summary path`: append a Markdown summary to the given file.
+
 Use in CI:
 
 ```sh
-araneae scan https://preview.example.com/docs/ \
+araneae check https://preview.example.com/docs/ \
   --out report.json \
   --fail-on-dead \
-  --fail-on-non-200
+  --fail-on-non-200 \
+  --fail-on-truncated \
+  --summary markdown \
+  --ci
+```
+
+When `--ci` is set and GitHub Actions provides `$GITHUB_STEP_SUMMARY`, Araneae appends a Markdown summary automatically. Outside GitHub Actions, pass `--github-step-summary summary.md` to write the same Markdown file explicitly.
+
+Minimal GitHub Actions example:
+
+```yaml
+name: docs-check
+
+on:
+  pull_request:
+
+jobs:
+  araneae:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build docs
+        run: make docs
+      - name: Serve docs
+        run: python3 -m http.server 8000 --directory public &
+      - name: Check docs links
+        run: |
+          araneae check http://127.0.0.1:8000/ \
+            --out araneae-report.json \
+            --local-root public \
+            --fail-on-dead \
+            --fail-on-non-200 \
+            --fail-on-truncated \
+            --summary markdown \
+            --ci
 ```
 
 ## Scope Rules

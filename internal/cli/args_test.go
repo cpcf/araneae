@@ -513,6 +513,62 @@ func TestParseScanArgsAcceptsFlagsBeforeEntryURL(t *testing.T) {
 	}
 }
 
+func TestParseCheckArgsAcceptsScanAndPolicyFlags(t *testing.T) {
+	opts, err := ParseCheckArgs([]string{
+		"https://docs.example.com/",
+		"--out", "report.json",
+		"--max-pages", "17",
+		"--header", "Authorization: Bearer token",
+		"--fail-on-dead",
+		"--fail-on-non-200",
+		"--fail-on-truncated",
+		"--summary", "markdown",
+		"--ci",
+		"--github-step-summary", "summary.md",
+	})
+	if err != nil {
+		t.Fatalf("ParseCheckArgs() error = %v", err)
+	}
+
+	if opts.scan.entryURL != "https://docs.example.com/" {
+		t.Fatalf("entryURL = %q", opts.scan.entryURL)
+	}
+	if opts.scan.out != "report.json" {
+		t.Fatalf("out = %q", opts.scan.out)
+	}
+	if opts.scan.maxPages != 17 {
+		t.Fatalf("maxPages = %d", opts.scan.maxPages)
+	}
+	if len(opts.scan.headers) != 1 {
+		t.Fatalf("headers = %#v; want 1", opts.scan.headers)
+	}
+	if !opts.policy.FailOnDead || !opts.policy.FailOnNon200 || !opts.policy.FailOnTruncated {
+		t.Fatalf("policy = %#v; want all fail flags", opts.policy)
+	}
+	if opts.summaryFormat != "markdown" {
+		t.Fatalf("summaryFormat = %q", opts.summaryFormat)
+	}
+	if !opts.ci {
+		t.Fatal("ci = false; want true")
+	}
+	if opts.githubStepSummary != "summary.md" {
+		t.Fatalf("githubStepSummary = %q", opts.githubStepSummary)
+	}
+}
+
+func TestParseCheckArgsRejectsInvalidSummaryFormat(t *testing.T) {
+	_, err := ParseCheckArgs([]string{
+		"https://docs.example.com/",
+		"--summary", "json",
+	})
+	if err == nil {
+		t.Fatal("ParseCheckArgs() error = nil; want error")
+	}
+	if !strings.Contains(err.Error(), "--summary") {
+		t.Fatalf("error = %q; want summary error", err)
+	}
+}
+
 func TestParseServeArgsAcceptsFlagsAfterReportPath(t *testing.T) {
 	opts, err := ParseServeArgs([]string{"report.json", "--addr", "127.0.0.1:9000"})
 	if err != nil {

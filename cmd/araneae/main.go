@@ -17,12 +17,14 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: araneae <scan|serve> [flags]")
+		return errors.New("usage: araneae <scan|check|serve> [flags]")
 	}
 
 	switch args[0] {
 	case "scan":
 		return cli.RunScan(args[1:])
+	case "check":
+		return cli.RunCheck(args[1:])
 	case "serve":
 		return cli.RunServe(args[1:])
 	case "-h", "--help", "help":
@@ -36,5 +38,6 @@ func run(args []string) error {
 func usage() string {
 	return `usage:
   araneae scan <entry-url> [flags]
+  araneae check <entry-url> [flags]
   araneae serve <report-path> [flags]`
 }
