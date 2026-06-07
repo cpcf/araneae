@@ -122,6 +122,8 @@ Important flags:
 - `--allow-host https://www.example.com`: additional exact origin that is safe to crawl. Can be repeated.
 - `--path-prefix /docs/`: optional normalized path prefix that same-scope links must match.
 - `--local-root public`: local static site root to seed the crawl with every `.html`/`.htm` page.
+- `--sitemap https://docs.example.com/sitemap.xml`: XML sitemap URL to seed the crawl. Can be repeated.
+- `--max-sitemap-urls 5000`: maximum in-scope page URLs to seed from explicit sitemaps.
 - `--user-agent "araneae/0.1"`: HTTP user agent.
 - `--fail-on-dead`: exit non-zero after writing the report if dead links are found.
 - `--fail-on-non-200`: exit non-zero after writing the report if any non-200 links are found.
@@ -178,6 +180,23 @@ araneae scan http://localhost:8000/docs/ \
 ```
 
 `--local-root` treats the directory as being served at the entry URL path. It maps `index.html` to the directory URL, for example `guide/index.html` becomes `/docs/guide/`.
+
+Seed a published docs scan from a sitemap:
+
+```sh
+araneae scan https://docs.example.com/ \
+  --sitemap https://docs.example.com/sitemap.xml
+```
+
+Seed a local preview from its generated sitemap:
+
+```sh
+araneae scan http://localhost:8000/docs/ \
+  --sitemap http://localhost:8000/docs/sitemap.xml \
+  --path-prefix /docs/
+```
+
+Explicit sitemaps may be `urlset` files or `sitemapindex` files. Sitemap-listed URLs are still checked against the normal origin, `--allow-host`, and `--path-prefix` rules; a sitemap broadens discovery, not crawl permission.
 
 For large docs sites and private preview environments, keep `--max-response-bytes` at the default unless you know pages legitimately need more room. The limit applies to HTML bodies because those are parsed for links and fragments. Non-HTML responses such as PDFs and downloads are checked from status, redirects, final URL, and content type without reading the full body. Use `--max-response-bytes 0` only when you deliberately want unlimited HTML body reads.
 

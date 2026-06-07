@@ -29,6 +29,8 @@ type scanOptions struct {
 	allowHosts       []string
 	pathPrefix       string
 	localRoot        string
+	sitemapURLs      []string
+	maxSitemapURLs   int
 	userAgent        string
 	failOnDead       bool
 	failOnNon200     bool
@@ -53,6 +55,10 @@ const (
 )
 
 var crawlRun = crawl.Run
+
+func newScanOptions() scanOptions {
+	return scanOptions{maxSitemapURLs: crawl.DefaultMaxSitemapURLs}
+}
 
 func parseRequestHeader(raw string) (requestHeader, error) {
 	name, value, ok := strings.Cut(raw, ":")
@@ -127,7 +133,22 @@ func parseRequestHeaders(raw []string) ([]requestHeader, error) {
 	return headers, nil
 }
 
-func registerScanFlags(fs *flag.FlagSet, opts *scanOptions, rawHeaders, allowHosts *stringSliceValue) {
+func parseSitemapURLs(raw []string) ([]string, error) {
+	sitemaps := make([]string, 0, len(raw))
+	for i, value := range raw {
+		parsed, err := url.Parse(value)
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+			return nil, fmt.Errorf("--sitemap %d: invalid sitemap URL", i+1)
+		}
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			return nil, fmt.Errorf("--sitemap %d: unsupported sitemap scheme %q", i+1, parsed.Scheme)
+		}
+		sitemaps = append(sitemaps, value)
+	}
+	return sitemaps, nil
+}
+
+func registerScanFlags(fs *flag.FlagSet, opts *scanOptions, rawHeaders, allowHosts, sitemapURLs *stringSliceValue) {
 	fs.StringVar(&opts.out, "out", "araneae-report.json", "output report path")
 	fs.IntVar(&opts.maxPages, "max-pages", 500, "maximum checked same-site fetch URLs")
 	fs.DurationVar(&opts.timeout, "timeout", 15*time.Second, "per-request timeout")
@@ -140,6 +161,8 @@ func registerScanFlags(fs *flag.FlagSet, opts *scanOptions, rawHeaders, allowHos
 	fs.Var(allowHosts, "allow-host", "additional exact origins allowed for crawl")
 	fs.StringVar(&opts.pathPrefix, "path-prefix", "", "optional path prefix restriction")
 	fs.StringVar(&opts.localRoot, "local-root", "", "local static site root to seed crawl with every HTML page")
+	fs.Var(sitemapURLs, "sitemap", "XML sitemap URL to seed crawl; can be repeated")
+	fs.IntVar(&opts.maxSitemapURLs, "max-sitemap-urls", opts.maxSitemapURLs, "maximum in-scope page URLs to seed from sitemaps")
 	fs.StringVar(&opts.userAgent, "user-agent", "araneae/0.1", "user-agent string")
 }
 
@@ -147,10 +170,11 @@ func parseScanCoreArgs(cmd string, args []string, registerExtra func(*flag.FlagS
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
-	var opts scanOptions
+	opts := newScanOptions()
 	var allowHosts stringSliceValue
 	var rawHeaders stringSliceValue
-	registerScanFlags(fs, &opts, &rawHeaders, &allowHosts)
+	var rawSitemapURLs stringSliceValue
+	registerScanFlags(fs, &opts, &rawHeaders, &allowHosts, &rawSitemapURLs)
 	if registerExtra != nil {
 		registerExtra(fs, &opts)
 	}
@@ -164,6 +188,10 @@ func parseScanCoreArgs(cmd string, args []string, registerExtra func(*flag.FlagS
 	}
 
 	opts.allowHosts = append(opts.allowHosts, allowHosts...)
+	opts.sitemapURLs, err = parseSitemapURLs(rawSitemapURLs)
+	if err != nil {
+		return opts, fmt.Errorf("%s: %w", cmd, err)
+	}
 	opts.headers, err = parseRequestHeaders(rawHeaders)
 	if err != nil {
 		return opts, fmt.Errorf("%s: %w", cmd, err)
@@ -194,6 +222,9 @@ func parseScanCoreArgs(cmd string, args []string, registerExtra func(*flag.FlagS
 	}
 	if opts.retryBackoff < 0 {
 		return opts, fmt.Errorf("%s: --retry-backoff must be >= 0", cmd)
+	}
+	if opts.maxSitemapURLs <= 0 {
+		return opts, fmt.Errorf("%s: --max-sitemap-urls must be > 0", cmd)
 	}
 
 	return opts, nil
@@ -241,10 +272,11 @@ func scanUsage() string {
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
-	var opts scanOptions
+	opts := newScanOptions()
 	var allowHosts stringSliceValue
 	var rawHeaders stringSliceValue
-	registerScanFlags(fs, &opts, &rawHeaders, &allowHosts)
+	var rawSitemapURLs stringSliceValue
+	registerScanFlags(fs, &opts, &rawHeaders, &allowHosts, &rawSitemapURLs)
 	fs.BoolVar(&opts.failOnDead, "fail-on-dead", false, "exit non-zero when dead links exist")
 	fs.BoolVar(&opts.failOnNon200, "fail-on-non-200", false, "exit non-zero when non-200 links exist")
 	return flagUsage("scan", "<entry-url>", fs)
@@ -268,6 +300,8 @@ func scanCrawlerOptions(opts scanOptions) crawl.ScanOptions {
 		AllowHosts:           opts.allowHosts,
 		PathPrefix:           opts.pathPrefix,
 		LocalRoot:            opts.localRoot,
+		SitemapURLs:          opts.sitemapURLs,
+		MaxSitemapURLs:       opts.maxSitemapURLs,
 		UserAgent:            opts.userAgent,
 	}
 }

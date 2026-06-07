@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -910,6 +911,251 @@ func TestCrawlerSeedsLocalRootHTMLPages(t *testing.T) {
 	}
 }
 
+func TestCrawlerSeedsSitemapURLsWithHeadersAndScope(t *testing.T) {
+	var sawSitemapHeader atomic.Bool
+	var serverURL string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/docs/":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(`<p>entry has no orphan link</p>`))
+		case "/sitemap.xml":
+			if r.Header.Get("X-Preview") == "sitemap-secret" && r.UserAgent() == "sitemap-agent" {
+				sawSitemapHeader.Store(true)
+			}
+			w.Header().Set("Content-Type", "application/xml")
+			_, _ = w.Write([]byte(`<urlset>
+				<url><loc>` + serverURL + `/docs/orphan</loc></url>
+				<url><loc>` + serverURL + `/outside</loc></url>
+				<url><loc>https://external.example.test/docs/external</loc></url>
+			</urlset>`))
+		case "/docs/orphan":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(`<a href="/docs/broken">Broken</a>`))
+		case "/docs/broken":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte("missing"))
+		case "/outside":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte("<p>outside path prefix</p>"))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	serverURL = server.URL
+
+	reportData, err := Run(context.Background(), ScanOptions{
+		EntryURL:       server.URL + "/docs/",
+		MaxPages:       10,
+		Timeout:        2 * time.Second,
+		UserAgent:      "sitemap-agent",
+		Concurrency:    1,
+		Headers:        []RequestHeader{{Name: "X-Preview", Value: "sitemap-secret"}},
+		PathPrefix:     "/docs/",
+		SitemapURLs:    []string{server.URL + "/sitemap.xml"},
+		MaxSitemapURLs: 10,
+	})
+	if err != nil {
+		t.Fatalf("run scanner: %v", err)
+	}
+
+	if !sawSitemapHeader.Load() {
+		t.Fatal("sitemap request did not receive configured same-origin headers")
+	}
+	if findFetchByURL(reportData, server.URL+"/docs/orphan") == nil {
+		t.Fatalf("sitemap orphan page was not fetched")
+	}
+	if findFetchByURL(reportData, server.URL+"/outside") != nil {
+		t.Fatalf("out-of-prefix sitemap page was fetched")
+	}
+
+	orphan := findLinkByURL(reportData, server.URL+"/docs/orphan")
+	if orphan == nil {
+		t.Fatalf("sitemap page link result was not recorded")
+	}
+	if !orphan.OK || orphan.Dead {
+		t.Fatalf("sitemap page health = ok:%v dead:%v; want OK", orphan.OK, orphan.Dead)
+	}
+	if len(orphan.Sources) != 1 || orphan.Sources[0].PageURL != server.URL+"/sitemap.xml" {
+		t.Fatalf("sitemap page sources = %#v; want sitemap source", orphan.Sources)
+	}
+
+	broken := findLinkByURL(reportData, server.URL+"/docs/broken")
+	if broken == nil || !broken.Dead || broken.Problem != "http_status" {
+		t.Fatalf("broken link = %#v; want dead http_status from sitemap-seeded page", broken)
+	}
+
+	outside := findSkippedByURL(reportData, server.URL+"/outside")
+	if outside == nil || outside.Reason != ScopeReasonOutsidePathPrefix {
+		t.Fatalf("outside sitemap skip = %#v; want outside_path_prefix", outside)
+	}
+	external := findSkippedByURL(reportData, "https://external.example.test/docs/external")
+	if external == nil || external.Reason != ScopeReasonExternalOrigin {
+		t.Fatalf("external sitemap skip = %#v; want external_origin", external)
+	}
+}
+
+func TestCrawlerFetchesSitemapIndexChildrenAndDeduplicatesPages(t *testing.T) {
+	entry := "https://docs.example.test/"
+	index := "https://docs.example.test/sitemap.xml"
+	childA := "https://docs.example.test/sitemap-a.xml"
+	childB := "https://docs.example.test/sitemap-b.xml"
+	page := "https://docs.example.test/from-sitemap"
+	fetcher := newSequencedFetcher(map[string][]FetchResult{
+		entry: {{
+			StatusCode:  http.StatusOK,
+			FinalURL:    entry,
+			ContentType: "text/html; charset=utf-8",
+			Body:        []byte("<p>entry</p>"),
+			CheckedAt:   time.Now().UTC(),
+		}},
+		index: {{
+			StatusCode:  http.StatusOK,
+			FinalURL:    index,
+			ContentType: "application/xml",
+			Body:        []byte(`<sitemapindex><sitemap><loc>` + childA + `</loc></sitemap><sitemap><loc>` + childB + `</loc></sitemap></sitemapindex>`),
+			CheckedAt:   time.Now().UTC(),
+		}},
+		childA: {{
+			StatusCode:  http.StatusOK,
+			FinalURL:    childA,
+			ContentType: "application/xml",
+			Body:        []byte(`<urlset><url><loc>` + page + `</loc></url></urlset>`),
+			CheckedAt:   time.Now().UTC(),
+		}},
+		childB: {{
+			StatusCode:  http.StatusOK,
+			FinalURL:    childB,
+			ContentType: "application/xml",
+			Body:        []byte(`<urlset><url><loc>` + page + `</loc></url></urlset>`),
+			CheckedAt:   time.Now().UTC(),
+		}},
+		page: {{
+			StatusCode:  http.StatusOK,
+			FinalURL:    page,
+			ContentType: "text/html; charset=utf-8",
+			Body:        []byte("<p>sitemap page</p>"),
+			CheckedAt:   time.Now().UTC(),
+		}},
+	})
+
+	reportData, err := Run(context.Background(), ScanOptions{
+		EntryURL:       entry,
+		MaxPages:       10,
+		Timeout:        2 * time.Second,
+		UserAgent:      "araneae-test",
+		Concurrency:    1,
+		Fetcher:        fetcher,
+		SitemapURLs:    []string{index},
+		MaxSitemapURLs: 10,
+	})
+	if err != nil {
+		t.Fatalf("run scanner: %v", err)
+	}
+
+	if got := fetcher.requestCount(index); got != 1 {
+		t.Fatalf("index requests = %d; want 1", got)
+	}
+	if got := fetcher.requestCount(childA); got != 1 {
+		t.Fatalf("child A requests = %d; want 1", got)
+	}
+	if got := fetcher.requestCount(childB); got != 1 {
+		t.Fatalf("child B requests = %d; want 1", got)
+	}
+	if got := fetcher.requestCount(page); got != 1 {
+		t.Fatalf("page requests = %d; want duplicate sitemap URL fetched once", got)
+	}
+	if findLinkByURL(reportData, page) == nil {
+		t.Fatalf("deduplicated sitemap page link was not recorded")
+	}
+}
+
+func TestCrawlerRejectsTooManySitemapPageURLs(t *testing.T) {
+	entry := "https://docs.example.test/"
+	sitemapURL := "https://docs.example.test/sitemap.xml"
+	fetcher := newSequencedFetcher(map[string][]FetchResult{
+		entry: {{
+			StatusCode:  http.StatusOK,
+			FinalURL:    entry,
+			ContentType: "text/html; charset=utf-8",
+			Body:        []byte("<p>entry</p>"),
+			CheckedAt:   time.Now().UTC(),
+		}},
+		sitemapURL: {{
+			StatusCode:  http.StatusOK,
+			FinalURL:    sitemapURL,
+			ContentType: "application/xml",
+			Body:        []byte(`<urlset><url><loc>https://docs.example.test/one</loc></url><url><loc>https://docs.example.test/two</loc></url></urlset>`),
+			CheckedAt:   time.Now().UTC(),
+		}},
+	})
+
+	_, err := Run(context.Background(), ScanOptions{
+		EntryURL:       entry,
+		MaxPages:       10,
+		Timeout:        2 * time.Second,
+		UserAgent:      "araneae-test",
+		Concurrency:    1,
+		Fetcher:        fetcher,
+		SitemapURLs:    []string{sitemapURL},
+		MaxSitemapURLs: 1,
+	})
+	if err == nil {
+		t.Fatal("run scanner error = nil; want sitemap URL limit error")
+	}
+	if !strings.Contains(err.Error(), "--max-sitemap-urls") {
+		t.Fatalf("run scanner error = %v; want max sitemap URL limit", err)
+	}
+}
+
+func TestCrawlerRejectsTooManyChildSitemaps(t *testing.T) {
+	entry := "https://docs.example.test/"
+	sitemapURL := "https://docs.example.test/sitemap.xml"
+	var index strings.Builder
+	index.WriteString("<sitemapindex>")
+	for i := 0; i <= maxChildSitemaps; i++ {
+		index.WriteString(`<sitemap><loc>https://docs.example.test/sitemap-`)
+		index.WriteString(strconv.Itoa(i))
+		index.WriteString(`.xml</loc></sitemap>`)
+	}
+	index.WriteString("</sitemapindex>")
+
+	fetcher := newSequencedFetcher(map[string][]FetchResult{
+		entry: {{
+			StatusCode:  http.StatusOK,
+			FinalURL:    entry,
+			ContentType: "text/html; charset=utf-8",
+			Body:        []byte("<p>entry</p>"),
+			CheckedAt:   time.Now().UTC(),
+		}},
+		sitemapURL: {{
+			StatusCode:  http.StatusOK,
+			FinalURL:    sitemapURL,
+			ContentType: "application/xml",
+			Body:        []byte(index.String()),
+			CheckedAt:   time.Now().UTC(),
+		}},
+	})
+
+	_, err := Run(context.Background(), ScanOptions{
+		EntryURL:       entry,
+		MaxPages:       1,
+		Timeout:        2 * time.Second,
+		UserAgent:      "araneae-test",
+		Concurrency:    1,
+		Fetcher:        fetcher,
+		SitemapURLs:    []string{sitemapURL},
+		MaxSitemapURLs: 10,
+	})
+	if err == nil {
+		t.Fatal("run scanner error = nil; want child sitemap limit error")
+	}
+	if !strings.Contains(err.Error(), "child sitemap limit") {
+		t.Fatalf("run scanner error = %v; want child sitemap limit", err)
+	}
+}
+
 func TestCrawlerConcurrentFetches(t *testing.T) {
 	entry := "https://docs.example.test/"
 	fetcher := newScriptedFetcher(map[string]scriptedFetch{
@@ -1357,6 +1603,18 @@ func findFetchByURL(r report.Report, url string) *report.FetchResult {
 	for _, fetch := range r.Fetches {
 		if fetch.URL == url {
 			return copy(fetch)
+		}
+	}
+	return nil
+}
+
+func findSkippedByURL(r report.Report, url string) *report.SkippedLink {
+	copy := func(skip report.SkippedLink) *report.SkippedLink {
+		return &skip
+	}
+	for _, skip := range r.SkippedLinks {
+		if skip.URL == url {
+			return copy(skip)
 		}
 	}
 	return nil

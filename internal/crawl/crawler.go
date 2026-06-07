@@ -28,6 +28,8 @@ type ScanOptions struct {
 	AllowHosts           []string
 	PathPrefix           string
 	LocalRoot            string
+	SitemapURLs          []string
+	MaxSitemapURLs       int
 	UserAgent            string
 	Fetcher              Fetcher
 	Parser               Parser
@@ -87,6 +89,9 @@ func NewCrawler(opts ScanOptions) *Crawler {
 	}
 	if opts.RetryBackoff < 0 {
 		opts.RetryBackoff = 0
+	}
+	if opts.MaxSitemapURLs <= 0 {
+		opts.MaxSitemapURLs = DefaultMaxSitemapURLs
 	}
 	return &Crawler{
 		opts:    opts,
@@ -249,6 +254,27 @@ func (c *Crawler) Run(ctx context.Context) (report.Report, error) {
 		addToQueue(raw.FetchURL)
 	}
 
+	addSitemapSeeds := func() error {
+		seeds, skips, err := c.sitemapSeeds(ctx, requestGate, c.opts.SitemapURLs, scope)
+		if err != nil {
+			return err
+		}
+		for _, seed := range seeds {
+			recordLink(seed.source, LinkOccurrence{
+				LinkURL:  seed.linkURL,
+				FetchURL: seed.fetchURL,
+				Text:     "sitemap",
+			}, ScopeDecision{Allowed: true})
+		}
+		for _, skip := range skips {
+			recordLink(skip.source, LinkOccurrence{
+				LinkURL: skip.url,
+				Text:    "sitemap",
+			}, ScopeDecision{Allowed: false, Reason: skip.reason})
+		}
+		return nil
+	}
+
 	processParsed := func(source string, parsed ParseResult) {
 		for _, link := range parsed.Links {
 			decision, err := scope.Check(link.FetchURL)
@@ -291,6 +317,9 @@ func (c *Crawler) Run(ctx context.Context) (report.Report, error) {
 
 	visited[entryFetch.URL] = true
 	processFetch(entryFetch)
+	if err := addSitemapSeeds(); err != nil {
+		return report.Report{}, fmt.Errorf("sitemap discovery failed: %w", err)
+	}
 	if err := addLocalRootSeeds(); err != nil {
 		return report.Report{}, fmt.Errorf("local root discovery failed: %w", err)
 	}
@@ -475,12 +504,16 @@ func (c *Crawler) Run(ctx context.Context) (report.Report, error) {
 }
 
 func (c *Crawler) fetchWithRetries(ctx context.Context, requestGate requestGate, fetchURL string) (FetchResult, error) {
+	return c.fetchWithRetriesFunc(ctx, requestGate, fetchURL, c.fetcher.Fetch)
+}
+
+func (c *Crawler) fetchWithRetriesFunc(ctx context.Context, requestGate requestGate, fetchURL string, fetchFunc func(context.Context, string) (FetchResult, error)) (FetchResult, error) {
 	totalDuration := time.Duration(0)
 	for attempt := 0; ; attempt++ {
 		if err := requestGate.Wait(ctx); err != nil {
 			return FetchResult{}, err
 		}
-		fetch, err := c.fetcher.Fetch(ctx, fetchURL)
+		fetch, err := fetchFunc(ctx, fetchURL)
 		if err != nil {
 			return fetch, err
 		}

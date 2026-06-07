@@ -15,6 +15,8 @@ func TestRunScanHelpWritesUsage(t *testing.T) {
 	assertContainsAll(t, got,
 		"usage: araneae scan <entry-url> [flags]",
 		"-max-pages",
+		"-sitemap",
+		"-max-sitemap-urls",
 		"-fail-on-dead",
 	)
 }
@@ -29,6 +31,8 @@ func TestRunCheckHelpWritesUsage(t *testing.T) {
 	assertContainsAll(t, got,
 		"usage: araneae check <entry-url> [flags]",
 		"-max-pages",
+		"-sitemap",
+		"-max-sitemap-urls",
 		"-fail-on-truncated",
 		"-baseline",
 		"-fail-on",

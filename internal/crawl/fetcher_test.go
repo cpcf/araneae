@@ -98,6 +98,39 @@ func TestHTTPFetcherSkipsNonHTMLResponseBody(t *testing.T) {
 	}
 }
 
+func TestHTTPFetcherFetchBodyReadsNonHTMLResponseBody(t *testing.T) {
+	fetcher := &HTTPFetcher{
+		userAgent:        "araneae-test",
+		maxResponseBytes: 1024,
+		client: &http.Client{
+			Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				headers := make(http.Header)
+				headers.Set("Content-Type", "application/xml")
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     headers,
+					Body:       io.NopCloser(strings.NewReader(`<urlset><url><loc>https://docs.example.test/</loc></url></urlset>`)),
+					Request:    req,
+				}, nil
+			}),
+		},
+	}
+
+	result, err := fetcher.FetchBody(context.Background(), "https://docs.example.test/sitemap.xml")
+	if err != nil {
+		t.Fatalf("FetchBody() error = %v", err)
+	}
+	if result.Error != "" {
+		t.Fatalf("error = %q; want empty", result.Error)
+	}
+	if result.ContentType != "application/xml" {
+		t.Fatalf("content type = %q; want application/xml", result.ContentType)
+	}
+	if !strings.Contains(string(result.Body), "<urlset>") {
+		t.Fatalf("body = %q; want sitemap XML", string(result.Body))
+	}
+}
+
 func TestHTTPFetcherSkipsNonOKHTMLResponseBody(t *testing.T) {
 	body := &readTrackingBody{}
 	fetcher := &HTTPFetcher{

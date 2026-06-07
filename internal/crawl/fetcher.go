@@ -61,6 +61,14 @@ func NewHTTPFetcher(timeout time.Duration, userAgent string, maxResponseBytes in
 }
 
 func (f *HTTPFetcher) Fetch(ctx context.Context, fetchURL string) (FetchResult, error) {
+	return f.fetch(ctx, fetchURL, false)
+}
+
+func (f *HTTPFetcher) FetchBody(ctx context.Context, fetchURL string) (FetchResult, error) {
+	return f.fetch(ctx, fetchURL, true)
+}
+
+func (f *HTTPFetcher) fetch(ctx context.Context, fetchURL string, readAnyOKBody bool) (FetchResult, error) {
 	startedAt := f.nowUTC()
 	result := FetchResult{
 		URL:       fetchURL,
@@ -107,7 +115,7 @@ func (f *HTTPFetcher) Fetch(ctx context.Context, fetchURL string) (FetchResult, 
 	result.FinalURL = response.Request.URL.String()
 	result.ContentType = response.Header.Get("Content-Type")
 
-	if result.StatusCode != http.StatusOK || !isHTMLContentType(result.ContentType) {
+	if result.StatusCode != http.StatusOK || (!readAnyOKBody && !isHTMLContentType(result.ContentType)) {
 		return finish(), nil
 	}
 

@@ -353,13 +353,14 @@ func checkUsage() string {
 	fs := flag.NewFlagSet("check", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
-	var scan scanOptions
+	scan := newScanOptions()
 	var allowHosts stringSliceValue
 	var rawHeaders stringSliceValue
+	var rawSitemapURLs stringSliceValue
 	var opts checkOptions
 	opts.summaryFormat = "text"
 	opts.failOn = string(checkeval.FailModeAll)
-	registerScanFlags(fs, &scan, &rawHeaders, &allowHosts)
+	registerScanFlags(fs, &scan, &rawHeaders, &allowHosts, &rawSitemapURLs)
 	fs.BoolVar(&opts.policy.FailOnDead, "fail-on-dead", false, "exit non-zero when dead links exist")
 	fs.BoolVar(&opts.policy.FailOnNon200, "fail-on-non-200", false, "exit non-zero when non-200 links exist")
 	fs.BoolVar(&opts.policy.FailOnTruncated, "fail-on-truncated", false, "exit non-zero when the scan hits --max-pages before visiting every queued URL")

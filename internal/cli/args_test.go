@@ -22,6 +22,9 @@ func TestParseScanArgsAcceptsFlagsAfterEntryURL(t *testing.T) {
 		"--allow-host", "https://www.example.com",
 		"--path-prefix", "/docs/",
 		"--local-root", "public",
+		"--sitemap", "https://docs.example.com/sitemap.xml",
+		"--sitemap", "https://docs.example.com/sitemap-api.xml",
+		"--max-sitemap-urls", "250",
 		"--user-agent", "custom-agent",
 		"--fail-on-dead",
 		"--fail-on-non-200",
@@ -75,6 +78,12 @@ func TestParseScanArgsAcceptsFlagsAfterEntryURL(t *testing.T) {
 	if opts.localRoot != "public" {
 		t.Fatalf("localRoot = %q", opts.localRoot)
 	}
+	if len(opts.sitemapURLs) != 2 || opts.sitemapURLs[0] != "https://docs.example.com/sitemap.xml" || opts.sitemapURLs[1] != "https://docs.example.com/sitemap-api.xml" {
+		t.Fatalf("sitemapURLs = %#v", opts.sitemapURLs)
+	}
+	if opts.maxSitemapURLs != 250 {
+		t.Fatalf("maxSitemapURLs = %d", opts.maxSitemapURLs)
+	}
 	if opts.userAgent != "custom-agent" {
 		t.Fatalf("userAgent = %q", opts.userAgent)
 	}
@@ -97,6 +106,9 @@ func TestParseScanArgsDefaultsMaxResponseBytes(t *testing.T) {
 	}
 	if opts.retryBackoff != 500*time.Millisecond {
 		t.Fatalf("retryBackoff = %s; want 500ms", opts.retryBackoff)
+	}
+	if opts.maxSitemapURLs != 5000 {
+		t.Fatalf("maxSitemapURLs = %d; want 5000", opts.maxSitemapURLs)
 	}
 }
 
@@ -151,6 +163,53 @@ func TestParseScanArgsRejectsNegativeRetryBackoff(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("ParseScanArgs() error = nil; want error")
+	}
+}
+
+func TestParseScanArgsRejectsInvalidSitemapURL(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "relative",
+			args: []string{
+				"https://docs.example.com/",
+				"--sitemap", "/sitemap.xml",
+			},
+		},
+		{
+			name: "unsupported scheme",
+			args: []string{
+				"https://docs.example.com/",
+				"--sitemap", "ftp://docs.example.com/sitemap.xml",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseScanArgs(tt.args)
+			if err == nil {
+				t.Fatal("ParseScanArgs() error = nil; want sitemap URL error")
+			}
+			if !strings.Contains(err.Error(), "--sitemap") {
+				t.Fatalf("error = %q; want sitemap error", err)
+			}
+		})
+	}
+}
+
+func TestParseScanArgsRejectsInvalidMaxSitemapURLs(t *testing.T) {
+	_, err := ParseScanArgs([]string{
+		"https://docs.example.com/",
+		"--max-sitemap-urls", "0",
+	})
+	if err == nil {
+		t.Fatal("ParseScanArgs() error = nil; want max sitemap URLs error")
+	}
+	if !strings.Contains(err.Error(), "--max-sitemap-urls") {
+		t.Fatalf("error = %q; want max sitemap URLs error", err)
 	}
 }
 
@@ -519,6 +578,8 @@ func TestParseCheckArgsAcceptsScanAndPolicyFlags(t *testing.T) {
 		"--out", "report.json",
 		"--max-pages", "17",
 		"--header", "Authorization: Bearer token",
+		"--sitemap", "https://docs.example.com/sitemap.xml",
+		"--max-sitemap-urls", "250",
 		"--fail-on-dead",
 		"--fail-on-non-200",
 		"--fail-on-truncated",
@@ -544,6 +605,12 @@ func TestParseCheckArgsAcceptsScanAndPolicyFlags(t *testing.T) {
 	}
 	if len(opts.scan.headers) != 1 {
 		t.Fatalf("headers = %#v; want 1", opts.scan.headers)
+	}
+	if len(opts.scan.sitemapURLs) != 1 || opts.scan.sitemapURLs[0] != "https://docs.example.com/sitemap.xml" {
+		t.Fatalf("sitemapURLs = %#v", opts.scan.sitemapURLs)
+	}
+	if opts.scan.maxSitemapURLs != 250 {
+		t.Fatalf("maxSitemapURLs = %d", opts.scan.maxSitemapURLs)
 	}
 	if !opts.policy.FailOnDead || !opts.policy.FailOnNon200 || !opts.policy.FailOnTruncated {
 		t.Fatalf("policy = %#v; want all fail flags", opts.policy)
