@@ -43,6 +43,8 @@ const metricWarning = document.getElementById("metric-warning");
 const metricAcknowledged = document.getElementById("metric-acknowledged");
 
 const acknowledgedStorageKey = "araneae.acknowledgedFingerprints";
+const unknownSourceKey = "(unknown source)";
+const unknownHostKey = "(unknown host)";
 const copySupport = Boolean(window.isSecureContext && navigator.clipboard && navigator.clipboard.writeText);
 
 let reportData = null;
@@ -417,7 +419,7 @@ function matchesTriageFilters(link) {
   }
   if (severitySelect.value && issue.severity !== severitySelect.value) return false;
   if (problemSelect.value && issue.problem !== problemSelect.value) return false;
-  if (hostSelect.value && issue.target_host !== hostSelect.value) return false;
+  if (hostSelect.value && normalizedHost(issue.target_host) !== hostSelect.value) return false;
   if (sourceSelect.value && !issueHasSource(issue, sourceSelect.value)) return false;
   if (stateSelect.value && issue.state !== stateSelect.value) return false;
   return true;
@@ -596,11 +598,22 @@ function sourceMatchesTerm(source, term) {
 }
 
 function issueHasSource(issue, pageURL) {
-  if ((issue.first_source || "") === pageURL) {
+  if (normalizedSource(issue.first_source) === pageURL) {
     return true;
   }
   const sources = issue.link?.sources || [];
-  return sources.some((source) => source.page_url === pageURL);
+  if (sources.length === 0) {
+    return pageURL === unknownSourceKey;
+  }
+  return sources.some((source) => normalizedSource(source.page_url) === pageURL);
+}
+
+function normalizedSource(source) {
+  return source || unknownSourceKey;
+}
+
+function normalizedHost(host) {
+  return host || unknownHostKey;
 }
 
 function currentVisibleIssues() {

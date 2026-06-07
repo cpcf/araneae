@@ -29,6 +29,11 @@ const (
 	StateExisting IssueState = "existing"
 )
 
+const (
+	UnknownSourceKey = "(unknown source)"
+	UnknownHostKey   = "(unknown host)"
+)
+
 type Issue struct {
 	Fingerprint string            `json:"fingerprint"`
 	Severity    Severity          `json:"severity"`
@@ -210,7 +215,7 @@ func FilterIssues(issues []Issue, filter Filter, acknowledged map[string]bool) [
 		if filter.Severity != "" && issue.Severity != filter.Severity {
 			continue
 		}
-		if filter.TargetHost != "" && issue.TargetHost != filter.TargetHost {
+		if filter.TargetHost != "" && normalizedHost(issue.TargetHost) != filter.TargetHost {
 			continue
 		}
 		if filter.SourcePage != "" && !issueHasSource(issue, filter.SourcePage) {
@@ -242,13 +247,13 @@ func GroupBySourcePage(issues []Issue) []Group {
 			sources = []report.ReportSource{{PageURL: issue.FirstSource}}
 		}
 		if len(sources) == 0 {
-			sources = []report.ReportSource{{PageURL: "(unknown source)"}}
+			sources = []report.ReportSource{{PageURL: UnknownSourceKey}}
 		}
 		seen := map[string]struct{}{}
 		for _, source := range sources {
 			key := source.PageURL
 			if key == "" {
-				key = "(unknown source)"
+				key = UnknownSourceKey
 			}
 			if _, ok := seen[key]; ok {
 				continue
@@ -282,7 +287,7 @@ func GroupByTargetHost(issues []Issue) []Group {
 	return groupIssues(issues, func(issue Issue) (string, string) {
 		host := issue.TargetHost
 		if host == "" {
-			host = "(unknown host)"
+			host = UnknownHostKey
 		}
 		return host, host
 	})
@@ -461,15 +466,29 @@ func targetHost(link report.LinkResult) string {
 }
 
 func issueHasSource(issue Issue, pageURL string) bool {
-	if issue.FirstSource == pageURL {
+	if normalizedSource(issue.FirstSource) == pageURL {
 		return true
 	}
 	for _, source := range issue.Link.Sources {
-		if source.PageURL == pageURL {
+		if normalizedSource(source.PageURL) == pageURL {
 			return true
 		}
 	}
 	return false
+}
+
+func normalizedSource(source string) string {
+	if source == "" {
+		return UnknownSourceKey
+	}
+	return source
+}
+
+func normalizedHost(host string) string {
+	if host == "" {
+		return UnknownHostKey
+	}
+	return host
 }
 
 func isRedirect(link report.LinkResult) bool {

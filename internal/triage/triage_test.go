@@ -175,6 +175,15 @@ func TestFilterIssues(t *testing.T) {
 			FirstSource: "https://docs.example.test/api",
 			Snippets:    []string{"API"},
 		},
+		{
+			Fingerprint: "c",
+			Severity:    SeverityCritical,
+			State:       StateUnknown,
+			URL:         "not a url",
+			Problem:     "network_error",
+			TargetHost:  "",
+			FirstSource: "",
+		},
 	}
 
 	got := FilterIssues(issues, Filter{Severity: SeverityCritical, Query: "broken"}, nil)
@@ -190,6 +199,16 @@ func TestFilterIssues(t *testing.T) {
 	got = FilterIssues(issues, Filter{SourcePage: "https://docs.example.test/guide"}, nil)
 	if len(got) != 1 || got[0].Fingerprint != "a" {
 		t.Fatalf("secondary source page filter = %#v", got)
+	}
+
+	got = FilterIssues(issues, Filter{SourcePage: UnknownSourceKey}, nil)
+	if len(got) != 1 || got[0].Fingerprint != "c" {
+		t.Fatalf("unknown source filter = %#v", got)
+	}
+
+	got = FilterIssues(issues, Filter{TargetHost: UnknownHostKey}, nil)
+	if len(got) != 1 || got[0].Fingerprint != "c" {
+		t.Fatalf("unknown host filter = %#v", got)
 	}
 }
 
