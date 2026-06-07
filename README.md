@@ -284,6 +284,7 @@ Baseline-aware CI should fetch the previous successful report from your artifact
             --local-root public \
             --fail-on-dead \
             --fail-on-non-200 \
+            --fail-on-truncated \
             $BASELINE_FLAGS \
             --summary markdown \
             --ci
