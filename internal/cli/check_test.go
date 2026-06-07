@@ -529,6 +529,174 @@ func TestRunCheckRejectsSymlinkPathAliases(t *testing.T) {
 	})
 }
 
+func TestRunCheckRejectsDanglingSymlinkAndSymlinkedParentAliases(t *testing.T) {
+	current := report.Report{
+		EntryURL: "https://docs.example.com/",
+		Summary:  report.ReportSummary{DeadLinks: 1},
+		Links: []report.LinkResult{
+			{
+				URL:      "https://docs.example.com/new",
+				FetchURL: "https://docs.example.com/new",
+				Dead:     true,
+				Problem:  "network_error",
+			},
+		},
+	}
+	restore := stubCrawlRun(t, current)
+	defer restore()
+
+	t.Run("dangling symlink comparison to out", func(t *testing.T) {
+		dir := t.TempDir()
+		outPath := filepath.Join(dir, "report.json")
+		comparisonPath := filepath.Join(dir, "comparison.json")
+		if err := os.Symlink("report.json", comparisonPath); err != nil {
+			t.Fatalf("create dangling symlink: %v", err)
+		}
+
+		err := runCheck(checkOptions{
+			scan: scanOptions{
+				entryURL: "https://docs.example.com/",
+				out:      outPath,
+			},
+			policy: checkeval.Options{
+				FailOnDead: true,
+				FailMode:   checkeval.FailModeNew,
+			},
+			comparisonOut: comparisonPath,
+			summaryFormat: "text",
+		}, io.Discard, nil)
+		if err == nil {
+			t.Fatal("runCheck() error = nil; want dangling symlink collision error")
+		}
+		if !strings.Contains(err.Error(), "--comparison-out") || !strings.Contains(err.Error(), "--out") {
+			t.Fatalf("error = %q; want comparison/out collision", err)
+		}
+		if _, statErr := os.Stat(outPath); !os.IsNotExist(statErr) {
+			t.Fatalf("out path was created before collision error: %v", statErr)
+		}
+	})
+
+	t.Run("symlinked parent comparison to out", func(t *testing.T) {
+		dir := t.TempDir()
+		realDir := filepath.Join(dir, "real")
+		if err := os.Mkdir(realDir, 0o755); err != nil {
+			t.Fatalf("create real dir: %v", err)
+		}
+		aliasDir := filepath.Join(dir, "alias")
+		if err := os.Symlink(realDir, aliasDir); err != nil {
+			t.Fatalf("create parent symlink: %v", err)
+		}
+
+		outPath := filepath.Join(realDir, "report.json")
+		comparisonPath := filepath.Join(aliasDir, "report.json")
+		err := runCheck(checkOptions{
+			scan: scanOptions{
+				entryURL: "https://docs.example.com/",
+				out:      outPath,
+			},
+			policy: checkeval.Options{
+				FailOnDead: true,
+				FailMode:   checkeval.FailModeNew,
+			},
+			comparisonOut: comparisonPath,
+			summaryFormat: "text",
+		}, io.Discard, nil)
+		if err == nil {
+			t.Fatal("runCheck() error = nil; want symlinked parent collision error")
+		}
+		if !strings.Contains(err.Error(), "--comparison-out") || !strings.Contains(err.Error(), "--out") {
+			t.Fatalf("error = %q; want comparison/out collision", err)
+		}
+		if _, statErr := os.Stat(outPath); !os.IsNotExist(statErr) {
+			t.Fatalf("out path was created before collision error: %v", statErr)
+		}
+	})
+}
+
+func TestRunCheckRejectsGithubStepSummaryCollisions(t *testing.T) {
+	current := report.Report{
+		EntryURL: "https://docs.example.com/",
+		Summary:  report.ReportSummary{DeadLinks: 1},
+		Links: []report.LinkResult{
+			{
+				URL:      "https://docs.example.com/new",
+				FetchURL: "https://docs.example.com/new",
+				Dead:     true,
+				Problem:  "network_error",
+			},
+		},
+	}
+	restore := stubCrawlRun(t, current)
+	defer restore()
+
+	t.Run("explicit with comparison", func(t *testing.T) {
+		dir := t.TempDir()
+		outPath := filepath.Join(dir, "current.json")
+		comparisonPath := filepath.Join(dir, "comparison.json")
+		err := runCheck(checkOptions{
+			scan: scanOptions{
+				entryURL: "https://docs.example.com/",
+				out:      outPath,
+			},
+			policy: checkeval.Options{
+				FailOnDead: true,
+				FailMode:   checkeval.FailModeNew,
+			},
+			comparisonOut:     comparisonPath,
+			githubStepSummary: comparisonPath,
+			summaryFormat:     "text",
+		}, io.Discard, nil)
+		if err == nil {
+			t.Fatal("runCheck() error = nil; want step summary collision error")
+		}
+		if !strings.Contains(err.Error(), "--github-step-summary") || !strings.Contains(err.Error(), "--comparison-out") {
+			t.Fatalf("error = %q; want step-summary/comparison collision", err)
+		}
+		if _, statErr := os.Stat(outPath); !os.IsNotExist(statErr) {
+			t.Fatalf("out path was created before collision error: %v", statErr)
+		}
+	})
+
+	t.Run("ci env with baseline", func(t *testing.T) {
+		dir := t.TempDir()
+		outPath := filepath.Join(dir, "current.json")
+		baselinePath := filepath.Join(dir, "baseline.json")
+		writeReportFixture(t, baselinePath, current)
+
+		err := runCheck(checkOptions{
+			scan: scanOptions{
+				entryURL: "https://docs.example.com/",
+				out:      outPath,
+			},
+			policy: checkeval.Options{
+				FailOnDead: true,
+				FailMode:   checkeval.FailModeNew,
+			},
+			baselinePath:  baselinePath,
+			ci:            true,
+			summaryFormat: "text",
+		}, io.Discard, func(name string) string {
+			if name == "GITHUB_STEP_SUMMARY" {
+				return baselinePath
+			}
+			return ""
+		})
+		if err == nil {
+			t.Fatal("runCheck() error = nil; want env step summary collision error")
+		}
+		if !strings.Contains(err.Error(), "--github-step-summary") || !strings.Contains(err.Error(), "--baseline") {
+			t.Fatalf("error = %q; want step-summary/baseline collision", err)
+		}
+		data, readErr := os.ReadFile(baselinePath)
+		if readErr != nil {
+			t.Fatalf("read baseline: %v", readErr)
+		}
+		if !strings.Contains(string(data), `"dead_links": 1`) {
+			t.Fatalf("baseline was overwritten: %s", data)
+		}
+	})
+}
+
 func writeReportFixture(t *testing.T, path string, reportData report.Report) {
 	t.Helper()
 

@@ -78,7 +78,8 @@ func runCheckCommand(args []string, stdout io.Writer, getenv func(string) string
 }
 
 func runCheck(opts checkOptions, stdout io.Writer, getenv func(string) string) error {
-	if err := validateCheckOutputPaths(opts); err != nil {
+	stepSummaryPath := githubStepSummaryPath(opts, getenv)
+	if err := validateCheckOutputPaths(opts, stepSummaryPath); err != nil {
 		return err
 	}
 	baselineReport, err := readBaselineReport(opts.baselinePath)
@@ -109,8 +110,8 @@ func runCheck(opts checkOptions, stdout io.Writer, getenv func(string) string) e
 		return fmt.Errorf("write check summary: %w", err)
 	}
 
-	if path := githubStepSummaryPath(opts, getenv); path != "" {
-		if err := appendGithubStepSummary(path, checkeval.MarkdownSummary(result)); err != nil {
+	if stepSummaryPath != "" {
+		if err := appendGithubStepSummary(stepSummaryPath, checkeval.MarkdownSummary(result)); err != nil {
 			return err
 		}
 	}
@@ -118,32 +119,95 @@ func runCheck(opts checkOptions, stdout io.Writer, getenv func(string) string) e
 	return result.Err()
 }
 
-func validateCheckOutputPaths(opts checkOptions) error {
-	if opts.baselinePath != "" && samePath(opts.scan.out, opts.baselinePath) {
-		return fmt.Errorf("check: --baseline must not be the same path as --out")
+func validateCheckOutputPaths(opts checkOptions, stepSummaryPath string) error {
+	paths := []checkPath{
+		{flag: "--out", path: opts.scan.out},
 	}
-	if opts.comparisonOut != "" && samePath(opts.scan.out, opts.comparisonOut) {
-		return fmt.Errorf("check: --comparison-out must not be the same path as --out")
+	if opts.baselinePath != "" {
+		paths = append(paths, checkPath{flag: "--baseline", path: opts.baselinePath})
 	}
-	if opts.baselinePath != "" && opts.comparisonOut != "" && samePath(opts.baselinePath, opts.comparisonOut) {
-		return fmt.Errorf("check: --comparison-out must not be the same path as --baseline")
+	if opts.comparisonOut != "" {
+		paths = append(paths, checkPath{flag: "--comparison-out", path: opts.comparisonOut})
+	}
+	if stepSummaryPath != "" {
+		paths = append(paths, checkPath{flag: "--github-step-summary", path: stepSummaryPath})
+	}
+
+	return validateDistinctPaths("check", paths)
+}
+
+type checkPath struct {
+	flag string
+	path string
+}
+
+func validateDistinctPaths(cmd string, paths []checkPath) error {
+	for i := 0; i < len(paths); i++ {
+		for j := i + 1; j < len(paths); j++ {
+			same, err := samePath(paths[i].path, paths[j].path)
+			if err != nil {
+				return fmt.Errorf("%s: compare %s and %s paths: %w", cmd, paths[i].flag, paths[j].flag, err)
+			}
+			if same {
+				return fmt.Errorf("%s: %s must not be the same path as %s", cmd, paths[j].flag, paths[i].flag)
+			}
+		}
 	}
 	return nil
 }
 
-func samePath(a, b string) bool {
+func samePath(a, b string) (bool, error) {
 	infoA, errA := os.Stat(a)
 	infoB, errB := os.Stat(b)
-	if errA == nil && errB == nil {
-		return os.SameFile(infoA, infoB)
+	if errA == nil && errB == nil && os.SameFile(infoA, infoB) {
+		return true, nil
 	}
 
-	absA, errA := filepath.Abs(a)
-	absB, errB := filepath.Abs(b)
-	if errA == nil && errB == nil {
-		return absA == absB
+	canonicalA, err := canonicalPath(a)
+	if err != nil {
+		return false, err
 	}
-	return filepath.Clean(a) == filepath.Clean(b)
+	canonicalB, err := canonicalPath(b)
+	if err != nil {
+		return false, err
+	}
+	return canonicalA == canonicalB, nil
+}
+
+func canonicalPath(path string) (string, error) {
+	return canonicalPathDepth(path, 0)
+}
+
+func canonicalPathDepth(path string, depth int) (string, error) {
+	if depth > 32 {
+		return "", fmt.Errorf("too many symlinks resolving %q", path)
+	}
+
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Lstat(abs)
+	if err == nil && info.Mode()&os.ModeSymlink != 0 {
+		target, err := os.Readlink(abs)
+		if err != nil {
+			return "", err
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(abs), target)
+		}
+		return canonicalPathDepth(target, depth+1)
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved, nil
+	}
+
+	parent := filepath.Dir(abs)
+	resolvedParent, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		return filepath.Clean(abs), nil
+	}
+	return filepath.Join(resolvedParent, filepath.Base(abs)), nil
 }
 
 func readBaselineReport(path string) (*report.Report, error) {
