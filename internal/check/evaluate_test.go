@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cpcf/araneae/internal/baseline"
 	"github.com/cpcf/araneae/internal/report"
 )
 
@@ -135,6 +136,40 @@ func TestEvaluateTruncatedReport(t *testing.T) {
 	}
 }
 
+func TestEvaluateFailModeNewUsesComparison(t *testing.T) {
+	result := Evaluate(report.Report{
+		Summary: report.ReportSummary{DeadLinks: 1},
+		Links: []report.LinkResult{
+			{
+				URL:      "https://docs.example.com/existing",
+				FetchURL: "https://docs.example.com/existing",
+				Dead:     true,
+				Problem:  "network_error",
+			},
+		},
+	}, Options{
+		FailOnDead: true,
+		FailMode:   FailModeNew,
+		Comparison: &baseline.Comparison{
+			Summary:  baseline.Summary{New: 0, Existing: 1},
+			Existing: []baseline.Issue{{URL: "https://docs.example.com/existing", Problem: "network_error"}},
+		},
+	})
+
+	if result.Failed() {
+		t.Fatal("Failed() = true; want false for existing-only issue in new mode")
+	}
+
+	result.Comparison.New = []baseline.Issue{{URL: "https://docs.example.com/new", Problem: "network_error"}}
+	result.Comparison.Summary.New = 1
+	if !result.Failed() {
+		t.Fatal("Failed() = false; want true for new issue in new mode")
+	}
+	if err := result.Err(); err == nil || !strings.Contains(err.Error(), "new_issues=1") {
+		t.Fatalf("Err() = %v; want new_issues failure", err)
+	}
+}
+
 func TestMarkdownSummary(t *testing.T) {
 	result := Evaluate(report.Report{
 		Summary: report.ReportSummary{
@@ -183,6 +218,74 @@ func TestMarkdownSummary(t *testing.T) {
 | URL | Problem | Status | Sources |
 | --- | --- | ---: | ---: |
 | https://docs.example.com/missing\|pipe | http_status | 404 | 2 |
+`
+	if got != want {
+		t.Fatalf("MarkdownSummary() =\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestMarkdownSummaryWithBaselineDiff(t *testing.T) {
+	result := Evaluate(report.Report{
+		Summary: report.ReportSummary{LinksDiscovered: 3, DeadLinks: 2},
+	}, Options{
+		FailOnDead: true,
+		FailMode:   FailModeNew,
+		Comparison: &baseline.Comparison{
+			Summary: baseline.Summary{New: 1, Existing: 1, Resolved: 1, UnchangedOK: 2},
+			New: []baseline.Issue{
+				{URL: "https://docs.example.com/new", Problem: "missing_fragment", StatusCode: 200, SourcePages: 2},
+			},
+			Existing: []baseline.Issue{
+				{URL: "https://docs.example.com/existing", Problem: "network_error", SourcePages: 1},
+			},
+			Resolved: []baseline.Issue{
+				{URL: "https://docs.example.com/resolved", Problem: "http_status", StatusCode: 404, SourcePages: 1},
+			},
+		},
+	})
+
+	got := MarkdownSummary(result)
+	want := `## Araneae Check Summary
+
+**Status:** FAIL
+
+| Metric | Count |
+| --- | ---: |
+| Links discovered | 3 |
+| Link occurrences | 0 |
+| Fetches attempted | 0 |
+| OK links | 0 |
+| Dead links | 2 |
+| Non-200 links | 0 |
+| Skipped links | 0 |
+| Unvisited URLs | 0 |
+
+### Baseline Diff
+
+| Group | Count |
+| --- | ---: |
+| New issues | 1 |
+| Existing issues | 1 |
+| Resolved issues | 1 |
+| Unchanged OK links | 2 |
+
+### New Issues
+
+| URL | Problem | Status | Sources |
+| --- | --- | ---: | ---: |
+| https://docs.example.com/new | missing_fragment | 200 | 2 |
+
+### Existing Issues
+
+| URL | Problem | Status | Sources |
+| --- | --- | ---: | ---: |
+| https://docs.example.com/existing | network_error | - | 1 |
+
+### Resolved Issues
+
+| URL | Problem | Status | Sources |
+| --- | --- | ---: | ---: |
+| https://docs.example.com/resolved | http_status | 404 | 1 |
 `
 	if got != want {
 		t.Fatalf("MarkdownSummary() =\n%s\nwant:\n%s", got, want)

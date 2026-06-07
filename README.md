@@ -196,6 +196,9 @@ It reuses the scan flags above and adds:
 - `--fail-on-dead`: exit non-zero when dead links or missing fragments exist.
 - `--fail-on-non-200`: exit non-zero when any checked link returns a non-200 HTTP status.
 - `--fail-on-truncated`: exit non-zero when `--max-pages` prevents visiting every queued URL.
+- `--baseline previous-report.json`: compare the current report with a previous JSON report.
+- `--fail-on all`: failure mode for link issues. `all` fails on every enabled current issue; `new` fails only on enabled issues absent from the baseline.
+- `--comparison-out comparison.json`: write a separate baseline comparison artifact.
 - `--summary text`: summary format for stdout. Use `markdown` for a Markdown table with top problems.
 - `--ci`: enable CI conveniences, including default GitHub step summary output when `$GITHUB_STEP_SUMMARY` is set.
 - `--github-step-summary path`: append a Markdown summary to the given file.
@@ -213,6 +216,22 @@ araneae check https://preview.example.com/docs/ \
 ```
 
 When `--ci` is set and GitHub Actions provides `$GITHUB_STEP_SUMMARY`, Araneae appends a Markdown summary automatically. Outside GitHub Actions, pass `--github-step-summary summary.md` to write the same Markdown file explicitly.
+
+To fail only on newly introduced link issues, pass a baseline report from an earlier run:
+
+```sh
+araneae check https://preview.example.com/docs/ \
+  --out report.json \
+  --baseline previous-report.json \
+  --comparison-out comparison.json \
+  --fail-on-dead \
+  --fail-on-non-200 \
+  --fail-on new \
+  --summary markdown \
+  --ci
+```
+
+Baseline issue identity is the normalized report link URL plus the problem value. HTTP status is reported as detail for `http_status` issues, but it is not part of the identity, so the same URL remains an existing issue if the server changes from one non-200 status to another.
 
 Minimal GitHub Actions example:
 
@@ -241,6 +260,39 @@ jobs:
             --fail-on-truncated \
             --summary markdown \
             --ci
+```
+
+Baseline-aware CI usually downloads the previous successful report artifact before running Araneae, then uploads the current report and comparison:
+
+```yaml
+      - name: Download previous report
+        uses: actions/download-artifact@v4
+        with:
+          name: araneae-report
+          path: baseline
+        continue-on-error: true
+      - name: Check docs links against baseline
+        run: |
+          BASELINE_FLAGS="--fail-on all"
+          if [ -f baseline/araneae-report.json ]; then
+            BASELINE_FLAGS="--baseline baseline/araneae-report.json --fail-on new"
+          fi
+          araneae check http://127.0.0.1:8000/ \
+            --out araneae-report.json \
+            --comparison-out araneae-comparison.json \
+            --local-root public \
+            --fail-on-dead \
+            --fail-on-non-200 \
+            $BASELINE_FLAGS \
+            --summary markdown \
+            --ci
+      - name: Upload current report
+        uses: actions/upload-artifact@v4
+        with:
+          name: araneae-report
+          path: |
+            araneae-report.json
+            araneae-comparison.json
 ```
 
 ## Scope Rules
@@ -370,6 +422,28 @@ Problem values include:
 `dead` is true for network failures, timeouts, TLS errors, HTTP 404/410, missing fragments, and HTML responses that exceed `--max-response-bytes`. `non_200` is true for any received HTTP status other than 200.
 
 `skipped_links` contains links Araneae saw but did not crawl, such as external origins or same-origin links outside `--path-prefix`.
+
+When `check` is run with `--comparison-out`, Araneae writes a separate JSON comparison artifact:
+
+```json
+{
+  "schema_version": 1,
+  "baseline_entry_url": "https://docs.example.com/",
+  "current_entry_url": "https://docs.example.com/",
+  "summary": {
+    "new": 1,
+    "existing": 2,
+    "resolved": 1,
+    "unchanged_ok": 42
+  },
+  "new": [],
+  "existing": [],
+  "resolved": [],
+  "unchanged_ok": []
+}
+```
+
+The comparison groups only include issue types enabled by the check policy flags, such as `--fail-on-dead` and `--fail-on-non-200`.
 
 ## Web UI
 

@@ -161,6 +161,180 @@ func TestRunCheckWritesExplicitGithubStepSummaryWithoutCI(t *testing.T) {
 	}
 }
 
+func TestRunCheckFailOnNewIgnoresExistingBaselineIssue(t *testing.T) {
+	current := report.Report{
+		EntryURL: "https://docs.example.com/",
+		Summary:  report.ReportSummary{DeadLinks: 1},
+		Links: []report.LinkResult{
+			{
+				URL:      "https://docs.example.com/existing",
+				FetchURL: "https://docs.example.com/existing",
+				Dead:     true,
+				Problem:  "network_error",
+			},
+		},
+	}
+	restore := stubCrawlRun(t, current)
+	defer restore()
+
+	dir := t.TempDir()
+	baselinePath := filepath.Join(dir, "baseline.json")
+	writeReportFixture(t, baselinePath, current)
+
+	var stdout strings.Builder
+	err := runCheck(checkOptions{
+		scan: scanOptions{
+			entryURL: "https://docs.example.com/",
+			out:      filepath.Join(dir, "current.json"),
+		},
+		policy: checkeval.Options{
+			FailOnDead: true,
+			FailMode:   checkeval.FailModeNew,
+		},
+		baselinePath:  baselinePath,
+		summaryFormat: "text",
+	}, &stdout, nil)
+	if err != nil {
+		t.Fatalf("runCheck() error = %v; want existing baseline issue to pass in new mode", err)
+	}
+	if !strings.Contains(stdout.String(), "new=0 existing=1 resolved=0") {
+		t.Fatalf("stdout = %q; want baseline diff counts", stdout.String())
+	}
+}
+
+func TestRunCheckFailOnAllFailsExistingBaselineIssue(t *testing.T) {
+	current := report.Report{
+		EntryURL: "https://docs.example.com/",
+		Summary:  report.ReportSummary{DeadLinks: 1},
+		Links: []report.LinkResult{
+			{
+				URL:      "https://docs.example.com/existing",
+				FetchURL: "https://docs.example.com/existing",
+				Dead:     true,
+				Problem:  "network_error",
+			},
+		},
+	}
+	restore := stubCrawlRun(t, current)
+	defer restore()
+
+	dir := t.TempDir()
+	baselinePath := filepath.Join(dir, "baseline.json")
+	writeReportFixture(t, baselinePath, current)
+
+	err := runCheck(checkOptions{
+		scan: scanOptions{
+			entryURL: "https://docs.example.com/",
+			out:      filepath.Join(dir, "current.json"),
+		},
+		policy: checkeval.Options{
+			FailOnDead: true,
+			FailMode:   checkeval.FailModeAll,
+		},
+		baselinePath:  baselinePath,
+		summaryFormat: "text",
+	}, io.Discard, nil)
+	if err == nil {
+		t.Fatal("runCheck() error = nil; want all-mode failure")
+	}
+	if !strings.Contains(err.Error(), "dead_links=1") {
+		t.Fatalf("error = %q; want dead_links failure", err)
+	}
+}
+
+func TestRunCheckFailOnNewFailsNewIssueAndWritesComparison(t *testing.T) {
+	baselineReport := report.Report{
+		EntryURL: "https://docs.example.com/",
+		Links: []report.LinkResult{
+			{
+				URL:      "https://docs.example.com/existing",
+				FetchURL: "https://docs.example.com/existing",
+				Dead:     true,
+				Problem:  "network_error",
+			},
+		},
+	}
+	current := report.Report{
+		EntryURL: "https://docs.example.com/",
+		Summary:  report.ReportSummary{DeadLinks: 2},
+		Links: []report.LinkResult{
+			baselineReport.Links[0],
+			{
+				URL:      "https://docs.example.com/new",
+				FetchURL: "https://docs.example.com/new",
+				Dead:     true,
+				Problem:  "missing_fragment",
+				Sources: []report.ReportSource{
+					{PageURL: "https://docs.example.com/"},
+				},
+			},
+		},
+	}
+	restore := stubCrawlRun(t, current)
+	defer restore()
+
+	dir := t.TempDir()
+	baselinePath := filepath.Join(dir, "baseline.json")
+	currentPath := filepath.Join(dir, "current.json")
+	comparisonPath := filepath.Join(dir, "comparison.json")
+	writeReportFixture(t, baselinePath, baselineReport)
+
+	var stdout strings.Builder
+	err := runCheck(checkOptions{
+		scan: scanOptions{
+			entryURL: "https://docs.example.com/",
+			out:      currentPath,
+		},
+		policy: checkeval.Options{
+			FailOnDead: true,
+			FailMode:   checkeval.FailModeNew,
+		},
+		baselinePath:  baselinePath,
+		comparisonOut: comparisonPath,
+		summaryFormat: "markdown",
+	}, &stdout, nil)
+	if err == nil {
+		t.Fatal("runCheck() error = nil; want new issue failure")
+	}
+	if !strings.Contains(err.Error(), "new_issues=1") {
+		t.Fatalf("error = %q; want new issue failure", err)
+	}
+	if !strings.Contains(stdout.String(), "### New Issues") || !strings.Contains(stdout.String(), "https://docs.example.com/new") {
+		t.Fatalf("stdout = %q; want markdown baseline summary", stdout.String())
+	}
+
+	currentData, err := os.ReadFile(currentPath)
+	if err != nil {
+		t.Fatalf("read current report: %v", err)
+	}
+	if !strings.Contains(string(currentData), `"dead_links": 2`) {
+		t.Fatalf("current report = %s; want written before policy failure", currentData)
+	}
+	comparisonData, err := os.ReadFile(comparisonPath)
+	if err != nil {
+		t.Fatalf("read comparison: %v", err)
+	}
+	if !strings.Contains(string(comparisonData), `"new": 1`) || !strings.Contains(string(comparisonData), `"existing": 1`) {
+		t.Fatalf("comparison = %s; want stable summary counts", comparisonData)
+	}
+	if !strings.Contains(string(comparisonData), "https://docs.example.com/new") {
+		t.Fatalf("comparison = %s; want new issue URL", comparisonData)
+	}
+}
+
+func writeReportFixture(t *testing.T, path string, reportData report.Report) {
+	t.Helper()
+
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create report fixture: %v", err)
+	}
+	defer file.Close()
+	if err := report.Write(file, reportData); err != nil {
+		t.Fatalf("write report fixture: %v", err)
+	}
+}
+
 func stubCrawlRun(t *testing.T, reportData report.Report) func() {
 	t.Helper()
 

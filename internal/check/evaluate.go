@@ -5,15 +5,25 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/cpcf/araneae/internal/baseline"
 	"github.com/cpcf/araneae/internal/report"
 )
 
 const defaultFailureLimit = 10
 
+type FailMode string
+
+const (
+	FailModeAll FailMode = "all"
+	FailModeNew FailMode = "new"
+)
+
 type Options struct {
 	FailOnDead      bool
 	FailOnNon200    bool
 	FailOnTruncated bool
+	FailMode        FailMode
+	Comparison      *baseline.Comparison
 }
 
 type Summary struct {
@@ -44,12 +54,14 @@ type Result struct {
 	Policy          Options
 	Summary         Summary
 	Failures        []Failure
+	Comparison      *baseline.Comparison
 	TruncatedFailed bool
 }
 
 func Evaluate(reportData report.Report, opts Options) Result {
 	result := Result{
-		Policy: opts,
+		Policy:     opts,
+		Comparison: opts.Comparison,
 		Summary: Summary{
 			LinksDiscovered:  reportData.Summary.LinksDiscovered,
 			LinkOccurrences:  reportData.Summary.LinkOccurrences,
@@ -85,7 +97,7 @@ func Evaluate(reportData report.Report, opts Options) Result {
 }
 
 func (r Result) Failed() bool {
-	return r.TruncatedFailed || len(r.Failures) > 0
+	return r.TruncatedFailed || r.policyFailureCount() > 0
 }
 
 func (r Result) Err() error {
@@ -94,11 +106,18 @@ func (r Result) Err() error {
 	}
 
 	parts := make([]string, 0, 3)
-	if r.Policy.FailOnDead && r.Summary.DeadLinks > 0 {
-		parts = append(parts, fmt.Sprintf("dead_links=%d", r.Summary.DeadLinks))
-	}
-	if r.Policy.FailOnNon200 && r.Summary.Non200Links > 0 {
-		parts = append(parts, fmt.Sprintf("non_200_links=%d", r.Summary.Non200Links))
+	switch r.failMode() {
+	case FailModeNew:
+		if r.policyFailureCount() > 0 {
+			parts = append(parts, fmt.Sprintf("new_issues=%d", r.policyFailureCount()))
+		}
+	default:
+		if r.Policy.FailOnDead && r.Summary.DeadLinks > 0 {
+			parts = append(parts, fmt.Sprintf("dead_links=%d", r.Summary.DeadLinks))
+		}
+		if r.Policy.FailOnNon200 && r.Summary.Non200Links > 0 {
+			parts = append(parts, fmt.Sprintf("non_200_links=%d", r.Summary.Non200Links))
+		}
 	}
 	if r.TruncatedFailed {
 		parts = append(parts, fmt.Sprintf("truncated=true unvisited_urls=%d", r.Summary.UnvisitedURLs))
@@ -109,12 +128,26 @@ func (r Result) Err() error {
 	return fmt.Errorf("check failed: %s", strings.Join(parts, " "))
 }
 
+func (r Result) failMode() FailMode {
+	if r.Policy.FailMode == "" {
+		return FailModeAll
+	}
+	return r.Policy.FailMode
+}
+
+func (r Result) policyFailureCount() int {
+	if r.failMode() == FailModeNew && r.Comparison != nil {
+		return len(r.Comparison.New)
+	}
+	return len(r.Failures)
+}
+
 func TextSummary(result Result) string {
 	status := "pass"
 	if result.Failed() {
 		status = "fail"
 	}
-	return fmt.Sprintf(
+	summary := fmt.Sprintf(
 		"status=%s links=%d occurrences=%d fetches=%d ok=%d dead=%d non_200=%d skipped=%d skipped_external=%d truncated=%t unvisited=%d failures=%d\n",
 		status,
 		result.Summary.LinksDiscovered,
@@ -128,6 +161,16 @@ func TextSummary(result Result) string {
 		result.Summary.Truncated,
 		result.Summary.UnvisitedURLs,
 		len(result.Failures),
+	)
+	if result.Comparison == nil {
+		return summary
+	}
+	return strings.TrimSuffix(summary, "\n") + fmt.Sprintf(
+		" new=%d existing=%d resolved=%d unchanged_ok=%d\n",
+		result.Comparison.Summary.New,
+		result.Comparison.Summary.Existing,
+		result.Comparison.Summary.Resolved,
+		result.Comparison.Summary.UnchangedOK,
 	)
 }
 
@@ -154,6 +197,11 @@ func MarkdownSummary(result Result) string {
 		fmt.Fprintf(&b, "\nReport was truncated before all queued URLs were visited.\n")
 	}
 
+	if result.Comparison != nil {
+		writeComparisonMarkdown(&b, result.Comparison)
+		return b.String()
+	}
+
 	fmt.Fprintf(&b, "\n### Top Problems\n\n")
 	if len(result.Failures) == 0 {
 		fmt.Fprintf(&b, "No failing links.\n")
@@ -173,6 +221,47 @@ func MarkdownSummary(result Result) string {
 		)
 	}
 	return b.String()
+}
+
+func writeComparisonMarkdown(b *strings.Builder, comparison *baseline.Comparison) {
+	fmt.Fprintf(b, "\n### Baseline Diff\n\n")
+	fmt.Fprintf(b, "| Group | Count |\n")
+	fmt.Fprintf(b, "| --- | ---: |\n")
+	fmt.Fprintf(b, "| New issues | %d |\n", comparison.Summary.New)
+	fmt.Fprintf(b, "| Existing issues | %d |\n", comparison.Summary.Existing)
+	fmt.Fprintf(b, "| Resolved issues | %d |\n", comparison.Summary.Resolved)
+	fmt.Fprintf(b, "| Unchanged OK links | %d |\n", comparison.Summary.UnchangedOK)
+
+	writeIssueSection(b, "New Issues", comparison.New)
+	writeIssueSection(b, "Existing Issues", comparison.Existing)
+	writeIssueSection(b, "Resolved Issues", comparison.Resolved)
+}
+
+func writeIssueSection(b *strings.Builder, title string, issues []baseline.Issue) {
+	fmt.Fprintf(b, "\n### %s\n\n", title)
+	if len(issues) == 0 {
+		fmt.Fprintf(b, "None.\n")
+		return
+	}
+	fmt.Fprintf(b, "| URL | Problem | Status | Sources |\n")
+	fmt.Fprintf(b, "| --- | --- | ---: | ---: |\n")
+	for _, issue := range topIssues(issues, defaultFailureLimit) {
+		fmt.Fprintf(
+			b,
+			"| %s | %s | %s | %d |\n",
+			escapeMarkdownCell(issue.URL),
+			escapeMarkdownCell(issue.Problem),
+			issueStatus(issue),
+			issue.SourcePages,
+		)
+	}
+}
+
+func topIssues(issues []baseline.Issue, limit int) []baseline.Issue {
+	if limit <= 0 || len(issues) <= limit {
+		return issues
+	}
+	return issues[:limit]
 }
 
 func topFailures(failures []Failure, limit int) []Failure {
@@ -210,6 +299,13 @@ func failureStatus(failure Failure) string {
 		return "-"
 	}
 	return fmt.Sprintf("%d", failure.StatusCode)
+}
+
+func issueStatus(issue baseline.Issue) string {
+	if issue.StatusCode == 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%d", issue.StatusCode)
 }
 
 func escapeMarkdownCell(value string) string {

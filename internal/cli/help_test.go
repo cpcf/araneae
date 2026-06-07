@@ -30,6 +30,9 @@ func TestRunCheckHelpWritesUsage(t *testing.T) {
 		"usage: araneae check <entry-url> [flags]",
 		"-max-pages",
 		"-fail-on-truncated",
+		"-baseline",
+		"-fail-on",
+		"-comparison-out",
 		"-summary",
 		"-github-step-summary",
 	)

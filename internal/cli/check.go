@@ -7,7 +7,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/cpcf/araneae/internal/baseline"
 	checkeval "github.com/cpcf/araneae/internal/check"
+	"github.com/cpcf/araneae/internal/report"
 )
 
 type checkOptions struct {
@@ -16,6 +18,9 @@ type checkOptions struct {
 	summaryFormat     string
 	ci                bool
 	githubStepSummary string
+	baselinePath      string
+	failOn            string
+	comparisonOut     string
 }
 
 func ParseCheckArgs(args []string) (checkOptions, error) {
@@ -23,6 +28,7 @@ func ParseCheckArgs(args []string) (checkOptions, error) {
 
 	var opts checkOptions
 	opts.summaryFormat = "text"
+	opts.failOn = string(checkeval.FailModeAll)
 
 	scanOpts, err := parseScanCoreArgs(cmd, args, func(fs *flag.FlagSet, _ *scanOptions) {
 		fs.BoolVar(&opts.policy.FailOnDead, "fail-on-dead", false, "exit non-zero when dead links exist")
@@ -31,6 +37,9 @@ func ParseCheckArgs(args []string) (checkOptions, error) {
 		fs.StringVar(&opts.summaryFormat, "summary", opts.summaryFormat, "summary format: text or markdown")
 		fs.BoolVar(&opts.ci, "ci", false, "enable CI conveniences such as default GitHub step summary output")
 		fs.StringVar(&opts.githubStepSummary, "github-step-summary", "", "path to append a GitHub step summary markdown report")
+		fs.StringVar(&opts.baselinePath, "baseline", "", "previous JSON report to compare against")
+		fs.StringVar(&opts.failOn, "fail-on", opts.failOn, "failure mode for link issues: all or new")
+		fs.StringVar(&opts.comparisonOut, "comparison-out", "", "write baseline comparison JSON to this path")
 	})
 	if err != nil {
 		return opts, err
@@ -41,6 +50,12 @@ func ParseCheckArgs(args []string) (checkOptions, error) {
 	case "text", "markdown":
 	default:
 		return opts, fmt.Errorf("%s: --summary must be one of: text, markdown", cmd)
+	}
+	switch checkeval.FailMode(opts.failOn) {
+	case checkeval.FailModeAll, checkeval.FailModeNew:
+		opts.policy.FailMode = checkeval.FailMode(opts.failOn)
+	default:
+		return opts, fmt.Errorf("%s: --fail-on must be one of: all, new", cmd)
 	}
 
 	return opts, nil
@@ -70,6 +85,19 @@ func runCheck(opts checkOptions, stdout io.Writer, getenv func(string) string) e
 		return err
 	}
 
+	comparison, err := buildComparison(opts, reportData)
+	if err != nil {
+		return err
+	}
+	if comparison != nil {
+		opts.policy.Comparison = comparison
+		if opts.comparisonOut != "" {
+			if err := writeComparisonFile(opts.comparisonOut, *comparison); err != nil {
+				return err
+			}
+		}
+	}
+
 	result := checkeval.Evaluate(reportData, opts.policy)
 	if _, err := io.WriteString(stdout, summaryOutput(result, opts.summaryFormat)); err != nil {
 		return fmt.Errorf("write check summary: %w", err)
@@ -82,6 +110,37 @@ func runCheck(opts checkOptions, stdout io.Writer, getenv func(string) string) e
 	}
 
 	return result.Err()
+}
+
+func buildComparison(opts checkOptions, reportData report.Report) (*baseline.Comparison, error) {
+	if opts.baselinePath == "" && opts.comparisonOut == "" && opts.policy.FailMode != checkeval.FailModeNew {
+		return nil, nil
+	}
+
+	var baselineReport *report.Report
+	if opts.baselinePath != "" {
+		parsed, err := report.Read(opts.baselinePath)
+		if err != nil {
+			return nil, err
+		}
+		baselineReport = &parsed
+	}
+
+	comparison := baseline.Compare(baselineReport, reportData, baseline.Options{
+		IncludeDead:   opts.policy.FailOnDead,
+		IncludeNon200: opts.policy.FailOnNon200,
+	})
+	return &comparison, nil
+}
+
+func writeComparisonFile(path string, comparison baseline.Comparison) error {
+	outputFile, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer outputFile.Close()
+
+	return baseline.Write(outputFile, comparison)
 }
 
 func summaryOutput(result checkeval.Result, format string) string {
@@ -128,6 +187,7 @@ func checkUsage() string {
 	var rawHeaders stringSliceValue
 	var opts checkOptions
 	opts.summaryFormat = "text"
+	opts.failOn = string(checkeval.FailModeAll)
 	registerScanFlags(fs, &scan, &rawHeaders, &allowHosts)
 	fs.BoolVar(&opts.policy.FailOnDead, "fail-on-dead", false, "exit non-zero when dead links exist")
 	fs.BoolVar(&opts.policy.FailOnNon200, "fail-on-non-200", false, "exit non-zero when non-200 links exist")
@@ -135,5 +195,8 @@ func checkUsage() string {
 	fs.StringVar(&opts.summaryFormat, "summary", opts.summaryFormat, "summary format: text or markdown")
 	fs.BoolVar(&opts.ci, "ci", false, "enable CI conveniences such as default GitHub step summary output")
 	fs.StringVar(&opts.githubStepSummary, "github-step-summary", "", "path to append a GitHub step summary markdown report")
+	fs.StringVar(&opts.baselinePath, "baseline", "", "previous JSON report to compare against")
+	fs.StringVar(&opts.failOn, "fail-on", opts.failOn, "failure mode for link issues: all or new")
+	fs.StringVar(&opts.comparisonOut, "comparison-out", "", "write baseline comparison JSON to this path")
 	return flagUsage("check", "<entry-url>", fs)
 }

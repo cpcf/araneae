@@ -525,6 +525,9 @@ func TestParseCheckArgsAcceptsScanAndPolicyFlags(t *testing.T) {
 		"--summary", "markdown",
 		"--ci",
 		"--github-step-summary", "summary.md",
+		"--baseline", "previous-report.json",
+		"--fail-on", "new",
+		"--comparison-out", "comparison.json",
 	})
 	if err != nil {
 		t.Fatalf("ParseCheckArgs() error = %v", err)
@@ -554,6 +557,15 @@ func TestParseCheckArgsAcceptsScanAndPolicyFlags(t *testing.T) {
 	if opts.githubStepSummary != "summary.md" {
 		t.Fatalf("githubStepSummary = %q", opts.githubStepSummary)
 	}
+	if opts.baselinePath != "previous-report.json" {
+		t.Fatalf("baselinePath = %q", opts.baselinePath)
+	}
+	if opts.policy.FailMode != "new" {
+		t.Fatalf("failMode = %q", opts.policy.FailMode)
+	}
+	if opts.comparisonOut != "comparison.json" {
+		t.Fatalf("comparisonOut = %q", opts.comparisonOut)
+	}
 }
 
 func TestParseCheckArgsRejectsInvalidSummaryFormat(t *testing.T) {
@@ -566,6 +578,19 @@ func TestParseCheckArgsRejectsInvalidSummaryFormat(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--summary") {
 		t.Fatalf("error = %q; want summary error", err)
+	}
+}
+
+func TestParseCheckArgsRejectsInvalidFailOn(t *testing.T) {
+	_, err := ParseCheckArgs([]string{
+		"https://docs.example.com/",
+		"--fail-on", "sometimes",
+	})
+	if err == nil {
+		t.Fatal("ParseCheckArgs() error = nil; want error")
+	}
+	if !strings.Contains(err.Error(), "--fail-on") {
+		t.Fatalf("error = %q; want fail-on error", err)
 	}
 }
 
