@@ -132,6 +132,12 @@ func validateCheckOutputPaths(opts checkOptions) error {
 }
 
 func samePath(a, b string) bool {
+	infoA, errA := os.Stat(a)
+	infoB, errB := os.Stat(b)
+	if errA == nil && errB == nil {
+		return os.SameFile(infoA, infoB)
+	}
+
 	absA, errA := filepath.Abs(a)
 	absB, errB := filepath.Abs(b)
 	if errA == nil && errB == nil {

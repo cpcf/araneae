@@ -438,6 +438,97 @@ func TestRunCheckRejectsComparisonOutCollisions(t *testing.T) {
 	}
 }
 
+func TestRunCheckRejectsSymlinkPathAliases(t *testing.T) {
+	current := report.Report{
+		EntryURL: "https://docs.example.com/",
+		Summary:  report.ReportSummary{DeadLinks: 1},
+		Links: []report.LinkResult{
+			{
+				URL:      "https://docs.example.com/new",
+				FetchURL: "https://docs.example.com/new",
+				Dead:     true,
+				Problem:  "network_error",
+			},
+		},
+	}
+	restore := stubCrawlRun(t, current)
+	defer restore()
+
+	t.Run("baseline and out", func(t *testing.T) {
+		dir := t.TempDir()
+		baselinePath := filepath.Join(dir, "baseline.json")
+		outPath := filepath.Join(dir, "current.json")
+		writeReportFixture(t, baselinePath, current)
+		if err := os.Symlink(baselinePath, outPath); err != nil {
+			t.Fatalf("create symlink: %v", err)
+		}
+
+		err := runCheck(checkOptions{
+			scan: scanOptions{
+				entryURL: "https://docs.example.com/",
+				out:      outPath,
+			},
+			policy: checkeval.Options{
+				FailOnDead: true,
+				FailMode:   checkeval.FailModeNew,
+			},
+			baselinePath:  baselinePath,
+			summaryFormat: "text",
+		}, io.Discard, nil)
+		if err == nil {
+			t.Fatal("runCheck() error = nil; want symlink collision error")
+		}
+		if !strings.Contains(err.Error(), "--baseline") || !strings.Contains(err.Error(), "--out") {
+			t.Fatalf("error = %q; want baseline/out collision", err)
+		}
+		data, readErr := os.ReadFile(baselinePath)
+		if readErr != nil {
+			t.Fatalf("read baseline: %v", readErr)
+		}
+		if !strings.Contains(string(data), `"dead_links": 1`) {
+			t.Fatalf("baseline was overwritten: %s", data)
+		}
+	})
+
+	t.Run("comparison and baseline", func(t *testing.T) {
+		dir := t.TempDir()
+		baselinePath := filepath.Join(dir, "baseline.json")
+		outPath := filepath.Join(dir, "current.json")
+		comparisonPath := filepath.Join(dir, "comparison.json")
+		writeReportFixture(t, baselinePath, current)
+		if err := os.Symlink(baselinePath, comparisonPath); err != nil {
+			t.Fatalf("create symlink: %v", err)
+		}
+
+		err := runCheck(checkOptions{
+			scan: scanOptions{
+				entryURL: "https://docs.example.com/",
+				out:      outPath,
+			},
+			policy: checkeval.Options{
+				FailOnDead: true,
+				FailMode:   checkeval.FailModeNew,
+			},
+			baselinePath:  baselinePath,
+			comparisonOut: comparisonPath,
+			summaryFormat: "text",
+		}, io.Discard, nil)
+		if err == nil {
+			t.Fatal("runCheck() error = nil; want symlink collision error")
+		}
+		if !strings.Contains(err.Error(), "--comparison-out") || !strings.Contains(err.Error(), "--baseline") {
+			t.Fatalf("error = %q; want comparison/baseline collision", err)
+		}
+		data, readErr := os.ReadFile(baselinePath)
+		if readErr != nil {
+			t.Fatalf("read baseline: %v", readErr)
+		}
+		if !strings.Contains(string(data), `"dead_links": 1`) {
+			t.Fatalf("baseline was overwritten: %s", data)
+		}
+	})
+}
+
 func writeReportFixture(t *testing.T, path string, reportData report.Report) {
 	t.Helper()
 

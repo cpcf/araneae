@@ -262,15 +262,16 @@ jobs:
             --ci
 ```
 
-Baseline-aware CI usually downloads the previous successful report artifact before running Araneae, then uploads the current report and comparison:
+Baseline-aware CI should fetch the previous successful report from your artifact store before running Araneae, then upload the current report and comparison. The exact fetch command depends on how your project stores artifacts:
 
 ```yaml
-      - name: Download previous report
-        uses: actions/download-artifact@v4
-        with:
-          name: araneae-report
-          path: baseline
-        continue-on-error: true
+      - name: Fetch previous report
+        run: |
+          mkdir -p baseline
+          # Replace this with your artifact-store lookup for the last successful
+          # default-branch report. Leave baseline/araneae-report.json absent
+          # on first run.
+          ./scripts/fetch-previous-araneae-report baseline/araneae-report.json || true
       - name: Check docs links against baseline
         run: |
           BASELINE_FLAGS="--fail-on all"
