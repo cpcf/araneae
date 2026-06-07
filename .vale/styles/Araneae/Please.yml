@@ -1,0 +1,7 @@
+extends: existence
+message: "Avoid '%s' in instructions."
+link: https://developers.google.com/style/tone
+ignorecase: true
+level: suggestion
+tokens:
+  - please

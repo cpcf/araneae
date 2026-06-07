@@ -1,0 +1,16 @@
+extends: existence
+message: "Avoid time-sensitive wording such as '%s'."
+link: https://developers.google.com/style/timeless-documentation
+ignorecase: true
+level: warning
+tokens:
+  - as of this writing
+  - at present
+  - currently
+  - eventually
+  - latest
+  - newer?
+  - now
+  - older?
+  - presently
+  - soon

@@ -1,0 +1,16 @@
+extends: existence
+message: "Avoid subjective or absolute claims such as '%s'."
+link: https://developers.google.com/style/excessive-claims
+ignorecase: true
+level: warning
+tokens:
+  - always
+  - easiest
+  - fastest
+  - guarantee
+  - guaranteed
+  - guarantees
+  - never
+  - simplest
+  - obviously
+  - simply

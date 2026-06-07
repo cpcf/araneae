@@ -1,76 +1,14 @@
 # Araneae
 
-Araneae is a link checker for documentation websites. Point it at one entry URL, and it crawls links that are safe for that site, checks each discovered target once, counts every link occurrence, and writes a JSON report. It also includes a small local web UI for triaging the report.
+Araneae checks links in documentation websites. Give it one entry URL, and
+Araneae crawls links that are safe for that site, checks each discovered target
+once, counts every link occurrence, and writes a JSON report. You can also open
+the report in a local web UI to decide what to fix first.
 
-The primary audience is technical writers and docs maintainers who need to validate a published docs site or preview environment before release.
+Technical writers and docs maintainers can use Araneae to validate a published
+docs site or preview environment before release.
 
-## What It Checks
-
-Araneae:
-
-- Fetches the entry URL first.
-- Parses HTML pages for `<a href="...">` links.
-- Crawls only links in the entry URL origin by default.
-- Accepts additional exact origins with `--allow-host`.
-- Optionally restricts crawling to a path prefix with `--path-prefix`.
-- Can seed a local docs build with `--local-root` so orphaned HTML pages are checked.
-- Counts duplicate link occurrences.
-- Fetches each normalized target URL once, even if multiple fragment links point to it.
-- Reports dead links, missing fragments, and non-200 HTTP responses.
-- Records skipped out-of-scope links separately.
-- Writes a stable JSON report and serves it in a local UI.
-
-Araneae does not execute JavaScript, authenticate to private sites, crawl external sites by default, or check image/script/style assets in the first version.
-
-## Dependencies
-
-For most technical writers, the recommended install path is a compiled release binary. Release binaries do not require Go or any other runtime dependency.
-
-If you install from source or build Araneae yourself, you need Go. This repository currently targets Go 1.26.2.
-
-- Official Go install instructions: [go.dev/doc/install](https://go.dev/doc/install)
-- After installing Go, verify it is available:
-
-```sh
-go version
-```
-
-## Install
-
-### Option 1: Download a release binary
-
-For Araneae 1.0 and later, download the binary for your operating system from the [GitHub releases page](https://github.com/cpcf/araneae/releases).
-
-1. Download the archive for your platform.
-2. Unpack it.
-3. Move the `araneae` executable somewhere on your `PATH`.
-4. Verify the command is available:
-
-```sh
-araneae help
-```
-
-### Option 2: Install from source
-
-Use this option if you are comfortable with Go tooling or need the latest code from the repository.
-
-```sh
-go install ./cmd/araneae
-```
-
-### Option 3: Build a local binary
-
-```sh
-go build -o araneae ./cmd/araneae
-```
-
-### Option 4: Run without installing
-
-```sh
-go run ./cmd/araneae scan https://docs.example.com/
-```
-
-## Usage
+## Quick start
 
 Run a scan:
 
@@ -78,7 +16,7 @@ Run a scan:
 araneae scan https://docs.example.com/ --out report.json
 ```
 
-Run a CI check:
+Run a CI-style check:
 
 ```sh
 araneae check https://docs.example.com/ \
@@ -94,565 +32,111 @@ Open the report in the local UI:
 araneae serve report.json
 ```
 
-The server prints the local URL it is serving. Use `--addr` to choose an address:
+To choose a local address, pass `--addr`:
 
 ```sh
 araneae serve report.json --addr 127.0.0.1:8080
 ```
 
-Flags may appear before or after the positional argument.
+## What it checks
 
-## Scan Options
+Araneae:
 
-```text
-araneae scan [entry-url] [flags]
-```
+- Fetches the entry URL first.
+- Parses HTML pages for `<a href="...">` links.
+- Crawls only links in the entry URL origin by default.
+- Accepts additional exact origins with `--allow-host`.
+- Restricts crawling to a path prefix when you pass `--path-prefix`.
+- Seeds local docs builds with `--local-root`.
+- Seeds scans from explicit XML sitemaps with `--sitemap`.
+- Counts duplicate link occurrences.
+- Fetches each normalized target URL once.
+- Reports dead links, missing fragments, non-200 responses, and skipped links.
+- Writes a stable JSON report and serves it in a local UI.
 
-Important flags:
+Araneae doesn't execute JavaScript, crawl external sites by default, or check
+image, script, or style assets.
 
-- `--config araneae.yaml`: load scan/check options from a YAML config file. If omitted, Araneae uses `araneae.yaml` or `.araneae.yaml` when present.
-- `--out araneae-report.json`: output report path.
-- `--max-pages 500`: maximum number of same-scope fetch URLs to check, including the entry URL.
-- `--timeout 15s`: per-request timeout.
-- `--concurrency 8`: number of concurrent fetch workers.
-- `--max-requests-per-second 0`: maximum request starts per second across all workers. `0` means unlimited.
-- `--max-response-bytes 5242880`: maximum HTML response body bytes to read. `0` means unlimited.
-- `--retries 0`: retry count for transient fetch failures, from `0` to `100`. `0` disables retries.
-- `--retry-backoff 500ms`: delay between retry attempts.
-- `--header "Name: value"`: HTTP request header to send with scan requests. Can be repeated.
-- `--allow-host https://www.example.com`: additional exact origin that is safe to crawl. Can be repeated.
-- `--path-prefix /docs/`: optional normalized path prefix that same-scope links must match.
-- `--local-root public`: local static site root to seed the crawl with every `.html`/`.htm` page.
-- `--sitemap https://docs.example.com/sitemap.xml`: XML sitemap URL to seed the crawl. Can be repeated.
-- `--max-sitemap-urls 5000`: maximum in-scope page URLs to seed from explicit sitemaps.
-- `--user-agent "araneae/0.1"`: HTTP user agent.
-- `--fail-on-dead`: exit non-zero after writing the report if dead links are found.
-- `--fail-on-non-200`: exit non-zero after writing the report if any non-200 links are found.
+## Install
 
-Examples:
+Download a release binary for your platform from the [GitHub releases].
+Release binaries don't require Go or another runtime dependency.
+
+If you work from a source checkout, use Go to build or run Araneae. The source
+tree targets Go 1.26.2.
 
 ```sh
-araneae scan https://docs.example.com/ \
-  --out report.json \
-  --max-pages 1000 \
-  --concurrency 8 \
-  --max-response-bytes 5242880 \
-  --retries 2 \
-  --retry-backoff 500ms \
-  --max-requests-per-second 5
+go build -o araneae ./cmd/araneae
+./araneae help
 ```
 
-Allow a second exact origin:
+For local development, run Araneae directly:
 
 ```sh
-araneae scan https://docs.example.com/ \
-  --allow-host https://www.example.com
+go run ./cmd/araneae scan https://docs.example.com/
 ```
 
-Scan an authenticated preview with a bearer token:
+## Common workflows
 
-```sh
-araneae scan https://preview.example.com/docs/ \
-  --header "Authorization: Bearer $DOCS_PREVIEW_TOKEN"
-```
-
-Scan a preview that uses cookie-based access:
-
-```sh
-araneae scan https://preview.example.com/docs/ \
-  --header "Cookie: preview_session=$DOCS_PREVIEW_COOKIE"
-```
-
-Quote the whole header argument so the shell passes the colon and spaces as one value. In CI, store token and cookie values in the platform's secret store and expand them through environment variables. Configured request header names and values are not written to the JSON report. Headers are sent only to the entry URL origin and same-origin redirects. They are not sent to `--allow-host` origins or cross-origin redirect targets. `Host` is not supported through `--header`. If `User-Agent` is provided with `--header`, the `--user-agent` flag value wins.
-
-Limit crawling to a docs subtree:
-
-```sh
-araneae scan https://example.com/docs/ \
-  --path-prefix /docs/
-```
-
-Check a local docs build for orphaned pages:
-
-```sh
-araneae scan http://localhost:8000/docs/ \
-  --local-root public/docs \
-  --path-prefix /docs/
-```
-
-`--local-root` treats the directory as being served at the entry URL path. It maps `index.html` to the directory URL, for example `guide/index.html` becomes `/docs/guide/`.
-
-Seed a published docs scan from a sitemap:
-
-```sh
-araneae scan https://docs.example.com/ \
-  --sitemap https://docs.example.com/sitemap.xml
-```
-
-Seed a local preview from its generated sitemap:
-
-```sh
-araneae scan http://localhost:8000/docs/ \
-  --sitemap http://localhost:8000/docs/sitemap.xml \
-  --path-prefix /docs/
-```
-
-Explicit sitemaps may be `urlset` files or `sitemapindex` files. Sitemap-listed URLs are still checked against the normal origin, `--allow-host`, and `--path-prefix` rules; a sitemap broadens discovery, not crawl permission.
-
-For large docs sites and private preview environments, keep `--max-response-bytes` at the default unless you know pages legitimately need more room. The limit applies to HTML bodies because those are parsed for links and fragments. Non-HTML responses such as PDFs and downloads are checked from status, redirects, final URL, and content type without reading the full body. Use `--max-response-bytes 0` only when you deliberately want unlimited HTML body reads.
-
-Use retries only when the target environment has occasional transient failures, such as preview hosts behind cold caches or short deploy windows. Retries apply to network errors, timeouts, HTTP 429, and HTTP 5xx responses. They do not retry deterministic outcomes such as 404, 410, missing fragments, parsing errors, or HTML responses over `--max-response-bytes`.
-
-## Check Options
-
-```text
-araneae check [entry-url] [flags]
-```
-
-`check` runs the same crawl as `scan`, writes the same JSON report, prints a concise status summary, and exits non-zero when enabled policy flags fail.
-
-It reuses the scan flags above and adds:
-
-- `--config araneae.yaml`: load scan/check options from a YAML config file. If omitted, Araneae uses `araneae.yaml` or `.araneae.yaml` when present.
-- `--fail-on-dead`: exit non-zero when dead links or missing fragments exist.
-- `--fail-on-non-200`: exit non-zero when any checked link returns a non-200 HTTP status.
-- `--fail-on-truncated`: exit non-zero when `--max-pages` prevents visiting every queued URL.
-- `--baseline previous-report.json`: compare the current report with a previous JSON report.
-- `--fail-on all`: failure mode for link issues. `all` fails on every enabled current issue; `new` fails only on enabled issues absent from the baseline.
-- `--comparison-out comparison.json`: write a separate baseline comparison artifact.
-- `--summary text`: summary format for stdout. Use `markdown` for a Markdown table with top problems.
-- `--ci`: enable CI conveniences, including default GitHub step summary output when `$GITHUB_STEP_SUMMARY` is set.
-- `--github-step-summary path`: append a Markdown summary to the given file.
-
-Use in CI:
+To scan an authenticated preview, set `DOCS_PREVIEW_TOKEN` to your preview
+token and run:
 
 ```sh
 araneae check https://preview.example.com/docs/ \
+  --header "Authorization: Bearer $DOCS_PREVIEW_TOKEN" \
+  --path-prefix /docs/ \
   --out report.json \
   --fail-on-dead \
   --fail-on-non-200 \
-  --fail-on-truncated \
-  --summary markdown \
-  --ci
+  --fail-on-truncated
 ```
 
-When `--ci` is set and GitHub Actions provides `$GITHUB_STEP_SUMMARY`, Araneae appends a Markdown summary automatically. Outside GitHub Actions, pass `--github-step-summary summary.md` to write the same Markdown file explicitly.
-
-To fail only on newly introduced link issues, pass a baseline report from an earlier run:
-
-```sh
-araneae check https://preview.example.com/docs/ \
-  --out report.json \
-  --baseline previous-report.json \
-  --comparison-out comparison.json \
-  --fail-on-dead \
-  --fail-on-non-200 \
-  --fail-on new \
-  --summary markdown \
-  --ci
-```
-
-Baseline issue identity is the normalized report link URL plus the problem value. HTTP status is reported as detail for `http_status` issues, but it is not part of the identity, so the same URL remains an existing issue if the server changes from one non-200 status to another.
-
-## Config File
-
-Use a YAML config file to keep docs-check policy reviewable in the repository and keep CI commands short. Araneae looks for `araneae.yaml` first, then `.araneae.yaml`. Pass `--config path/to/file.yaml` to use an explicit path. CLI flags override config values; for repeatable fields such as `--header`, `--allow-host`, and `--sitemap`, any CLI values replace the config list for that field.
-
-Example `araneae.yaml`:
+To keep CI commands short, create `araneae.yaml`:
 
 ```yaml
-schema_version: 1
 entry_url: https://docs.example.com/
 out: araneae-report.json
 max_pages: 1000
-timeout: 15s
-concurrency: 8
-max_requests_per_second: 5
 path_prefix: /docs/
-allow_hosts:
-  - https://www.example.com
 sitemaps:
   - https://docs.example.com/sitemap.xml
-headers:
-  - name: Authorization
-    value_env: DOCS_AUTH_HEADER
 fail_on_dead: true
 fail_on_non_200: true
 fail_on_truncated: true
-fail_on: new
-baseline: araneae-baseline.json
-comparison_out: araneae-comparison.json
 summary: markdown
 ci: true
 ```
 
-Run it locally or in CI:
+Then run:
 
 ```sh
 araneae check --config araneae.yaml
 ```
 
-`entry_url` may be provided by the config file, so the positional entry URL is optional when config supplies it. Durations use Go-style strings such as `15s`, `500ms`, and `1m`. Unknown config fields are rejected so misspelled policy does not silently pass.
-
-Headers can use literal values or environment-backed values:
+To run Araneae from GitHub Actions, use the composite action:
 
 ```yaml
-headers:
-  - name: Authorization
-    value_env: DOCS_AUTH_HEADER
-  - name: X-Preview
-    value: enabled
+- id: araneae
+  uses: cpcf/araneae@v1
+  with:
+    entry-url: https://docs.example.com/
+    out: araneae-report.json
+    sitemap: https://docs.example.com/sitemap.xml
+    fail-on: all
 ```
 
-`value_env` reads the named environment variable at runtime and errors if it is not set. Resolved header values are passed through the same validation as `--header`, are not printed in parser errors, and are not written to the JSON report.
+## Documentation
 
-Minimal config-based GitHub Actions step:
-
-```yaml
-      - name: Check docs links
-        run: araneae check --config araneae.yaml
-        env:
-          DOCS_AUTH_HEADER: Bearer ${{ secrets.DOCS_PREVIEW_TOKEN }}
-```
-
-### GitHub Action
-
-This repository includes a composite GitHub Action for docs checks. Tagged action refs try to use the matching release binary first, then fall back to running from source. Local and branch refs use the source fallback. The action enables the GitHub step summary by default, writes the JSON report to `out`, and exposes `report-path` and `comparison-path` outputs for artifact upload.
-
-Basic published docs check:
-
-```yaml
-name: docs-check
-
-on:
-  pull_request:
-
-jobs:
-  araneae:
-    runs-on: ubuntu-latest
-    steps:
-      - id: araneae
-        uses: cpcf/araneae@v1
-        with:
-          entry-url: https://docs.example.com/
-          out: araneae-report.json
-          max-pages: "1000"
-          sitemap: https://docs.example.com/sitemap.xml
-          fail-on: all
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: araneae-report
-          path: ${{ steps.araneae.outputs['report-path'] }}
-```
-
-Preview URL check with auth headers from secrets:
-
-```yaml
-      - id: araneae
-        uses: cpcf/araneae@v1
-        with:
-          entry-url: https://preview.example.com/docs/
-          out: araneae-report.json
-          path-prefix: /docs/
-          headers: |
-            Authorization: Bearer ${{ secrets.DOCS_PREVIEW_TOKEN }}
-          fail-on: all
-```
-
-Baseline artifact flow:
-
-```yaml
-      - name: Fetch previous report
-        run: |
-          mkdir -p baseline
-          ./scripts/fetch-previous-araneae-report baseline/araneae-report.json || true
-      - id: baseline
-        run: |
-          if [ -f baseline/araneae-report.json ]; then
-            echo "path=baseline/araneae-report.json" >> "$GITHUB_OUTPUT"
-            echo "fail_on=new" >> "$GITHUB_OUTPUT"
-          else
-            echo "path=" >> "$GITHUB_OUTPUT"
-            echo "fail_on=all" >> "$GITHUB_OUTPUT"
-          fi
-      - id: araneae
-        uses: cpcf/araneae@v1
-        with:
-          entry-url: https://preview.example.com/docs/
-          out: artifacts/araneae-report.json
-          baseline: ${{ steps.baseline.outputs.path }}
-          fail-on: ${{ steps.baseline.outputs.fail_on }}
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: araneae-report
-          path: |
-            ${{ steps.araneae.outputs['report-path'] }}
-            ${{ steps.araneae.outputs['comparison-path'] }}
-```
-
-Minimal raw-command GitHub Actions example:
-
-```yaml
-name: docs-check
-
-on:
-  pull_request:
-
-jobs:
-  araneae:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build docs
-        run: make docs
-      - name: Serve docs
-        run: python3 -m http.server 8000 --directory public &
-      - name: Check docs links
-        run: |
-          araneae check http://127.0.0.1:8000/ \
-            --out araneae-report.json \
-            --local-root public \
-            --fail-on-dead \
-            --fail-on-non-200 \
-            --fail-on-truncated \
-            --summary markdown \
-            --ci
-```
-
-Baseline-aware CI should fetch the previous successful report from your artifact store before running Araneae, then upload the current report and comparison. The exact fetch command depends on how your project stores artifacts:
-
-```yaml
-      - name: Fetch previous report
-        run: |
-          mkdir -p baseline
-          # Replace this with your artifact-store lookup for the last successful
-          # default-branch report. Leave baseline/araneae-report.json absent
-          # on first run.
-          ./scripts/fetch-previous-araneae-report baseline/araneae-report.json || true
-      - name: Check docs links against baseline
-        run: |
-          BASELINE_FLAGS="--fail-on all"
-          if [ -f baseline/araneae-report.json ]; then
-            BASELINE_FLAGS="--baseline baseline/araneae-report.json --fail-on new"
-          fi
-          araneae check http://127.0.0.1:8000/ \
-            --out araneae-report.json \
-            --comparison-out araneae-comparison.json \
-            --local-root public \
-            --fail-on-dead \
-            --fail-on-non-200 \
-            --fail-on-truncated \
-            $BASELINE_FLAGS \
-            --summary markdown \
-            --ci
-      - name: Upload current report
-        uses: actions/upload-artifact@v4
-        with:
-          name: araneae-report
-          path: |
-            araneae-report.json
-            araneae-comparison.json
-```
-
-## Scope Rules
-
-By default, Araneae crawls only the final entry URL origin after redirects. Origin means scheme, host, and port.
-
-For example, this scan:
-
-```sh
-araneae scan https://docs.example.com/
-```
-
-will crawl `https://docs.example.com/...`, but it will not crawl:
-
-- `https://www.example.com/...`
-- `https://api.example.com/...`
-- `http://docs.example.com/...`
-
-Use `--allow-host` for additional safe origins. The match is exact by origin:
-
-```sh
-araneae scan https://docs.example.com/ \
-  --allow-host https://www.example.com
-```
-
-Use `--path-prefix` to keep the crawl inside a subtree:
-
-```sh
-araneae scan https://example.com/docs/ --path-prefix /docs/
-```
-
-Same-origin links outside the prefix are recorded under `skipped_links` with reason `outside_path_prefix`.
-
-## Expected Output
-
-The scan writes a JSON report. The top-level shape is:
-
-```json
-{
-  "schema_version": 1,
-  "generated_at": "2026-05-28T15:04:46Z",
-  "entry_url": "https://docs.example.com/",
-  "scope": {
-    "origin": "https://docs.example.com",
-    "allowed_origins": [],
-    "same_site_policy": "exact_origin_with_allowlist",
-    "path_prefix": ""
-  },
-  "limits": {
-    "max_pages": 500,
-    "request_timeout_seconds": 15,
-    "max_concurrency": 8,
-    "max_requests_per_second": 0,
-    "max_response_bytes": 5242880,
-    "retries": 0,
-    "retry_backoff_ms": 500
-  },
-  "summary": {
-    "links_discovered": 5,
-    "link_occurrences": 6,
-    "fetches_attempted": 4,
-    "ok_links": 3,
-    "dead_links": 2,
-    "non_200_links": 1,
-    "skipped_links": 1,
-    "skipped_external_links": 1,
-    "truncated": false,
-    "unvisited_urls": 0
-  },
-  "links": [],
-  "fetches": [],
-  "skipped_links": []
-}
-```
-
-Each `links` entry represents one normalized navigable URL. Fragment variants are separate links but share a `fetch_url`:
-
-```json
-{
-  "url": "https://docs.example.com/install#requirements",
-  "fetch_url": "https://docs.example.com/install",
-  "count": 4,
-  "ok": false,
-  "dead": true,
-  "non_200": false,
-  "problem": "missing_fragment",
-  "status_code": 200,
-  "final_url": "https://docs.example.com/install",
-  "content_type": "text/html",
-  "error": "",
-  "sources": [
-    {
-      "page_url": "https://docs.example.com/",
-      "count": 2,
-      "texts": ["Requirements"]
-    }
-  ]
-}
-```
-
-Each `fetches` entry records one fetched URL, including redirect metadata, when the check completed, and `duration_ms`, the elapsed fetch time in milliseconds. When retries are enabled, `duration_ms` covers the final reported retry cycle, including retry attempts and configured retry backoff delays.
-
-```json
-{
-  "url": "https://docs.example.com/install",
-  "status_code": 200,
-  "final_url": "https://docs.example.com/install",
-  "content_type": "text/html",
-  "error": "",
-  "redirect_chain": [],
-  "checked_at": "2026-05-28T15:04:47Z",
-  "duration_ms": 128
-}
-```
-
-Problem values include:
-
-- `http_status`: a received HTTP status other than 200.
-- `network_error`: DNS, connection, or other network failure.
-- `timeout`: request timeout.
-- `tls_error`: TLS/certificate failure.
-- `too_many_redirects`: redirect limit exceeded.
-- `missing_fragment`: linked fragment was not found on a 200 HTML page.
-- `parsing_error`: HTML parsing failed.
-- `response_too_large`: an HTML response exceeded `--max-response-bytes`.
-
-`dead` is true for network failures, timeouts, TLS errors, HTTP 404/410, missing fragments, and HTML responses that exceed `--max-response-bytes`. `non_200` is true for any received HTTP status other than 200.
-
-`skipped_links` contains links Araneae saw but did not crawl, such as external origins or same-origin links outside `--path-prefix`.
-
-When `check` is run with `--comparison-out`, Araneae writes a separate JSON comparison artifact:
-
-```json
-{
-  "schema_version": 1,
-  "baseline_entry_url": "https://docs.example.com/",
-  "current_entry_url": "https://docs.example.com/",
-  "summary": {
-    "new": 1,
-    "existing": 2,
-    "resolved": 1,
-    "unchanged_ok": 42
-  },
-  "new": [],
-  "existing": [],
-  "resolved": [],
-  "unchanged_ok": []
-}
-```
-
-The comparison groups only include issue types enabled by the check policy flags, such as `--fail-on-dead` and `--fail-on-non-200`.
-
-## Web UI
-
-The UI is served locally from the Go binary:
-
-```sh
-araneae serve report.json
-```
-
-To mark issues as new or existing, serve the report with the previous baseline report:
-
-```sh
-araneae serve report.json --baseline previous-report.json
-```
-
-It includes:
-
-- Summary metrics.
-- Problem links with severity, problem type, target host, source page, and baseline state filters.
-- Skipped links table.
-- Search by link URL or source page.
-- Sorting by severity, count, status, URL, and source count.
-- Link detail with sources, snippets, redirect chain, final URL, content type, and error details.
-- Markdown and CSV exports for the currently filtered triage issue list.
-- Browser-local acknowledged state keyed by stable issue fingerprints, with a reset action.
-- Copy URL and copy source page actions when browser clipboard support is available.
-
-Acknowledged state is stored only in the current browser through `localStorage`; it is not written back to the report and is not shared with teammates. A typical docs PR triage flow is to serve the report with `--baseline`, filter to critical new issues first, export the filtered Markdown list into the PR discussion, then acknowledge items locally as they are assigned or intentionally deferred.
-
-## Local Test Site
-
-The repository includes a small static site for manual checks:
-
-```sh
-cd examples/test-site
-python3 -m http.server 8000
-```
-
-Then scan it:
-
-```sh
-araneae scan http://127.0.0.1:8000/index.html \
-  --out report.json \
-  --max-pages 20 \
-  --concurrency 4
-```
-
-See [examples/test-site/README.md](examples/test-site/README.md) for details.
+- [Use Araneae](docs/usage.md): command-line options, scan limits, request
+  headers, sitemaps, scope rules, and baseline checks.
+- [Configuration](docs/configuration.md): YAML config files, command-line
+  override behavior, and environment-backed header values.
+- [GitHub Actions](docs/github-actions.md): composite action inputs, artifact
+  handling, preview authentication, baseline flows, and raw-command examples.
+- [Reports and UI](docs/reports-and-ui.md): JSON report shape, comparison
+  artifacts, problem values, and local triage UI behavior.
+- [Local test site](examples/test-site/README.md): sample static site for
+  manual checks.
 
 ## Development
 
@@ -667,3 +151,17 @@ Run the crawler race test:
 ```sh
 go test -race ./internal/crawl
 ```
+
+Sync packaged Vale styles:
+
+```sh
+vale sync
+```
+
+Run documentation style checks:
+
+```sh
+vale .
+```
+
+[GitHub releases]: https://github.com/cpcf/araneae/releases

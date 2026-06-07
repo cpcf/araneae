@@ -1,0 +1,14 @@
+text := import("text")
+
+matches := []
+offset := 0
+
+for line in text.split(scope, "\n") {
+	if len(line) > 80 {
+		matches = append(matches, {
+			begin: offset + 80,
+			end: offset + len(line)
+		})
+	}
+	offset += len(line) + 1
+}

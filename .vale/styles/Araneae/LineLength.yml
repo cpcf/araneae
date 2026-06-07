@@ -1,0 +1,6 @@
+extends: script
+message: "Keep lines to 80 characters or fewer."
+link: https://developers.google.com/style/code-samples
+level: error
+scope: raw
+script: LineLength.tengo
