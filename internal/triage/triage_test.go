@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cpcf/araneae/internal/baseline"
 	"github.com/cpcf/araneae/internal/report"
 )
 
@@ -109,25 +108,44 @@ func TestIssuesAnnotatesStateAndGroups(t *testing.T) {
 		},
 	}
 
-	issues := Issues(reportData, &baseline.Comparison{
-		New: []baseline.Issue{{URL: "https://docs.example.test/missing", Problem: "http_status"}},
-	})
+	baselineReport := report.Report{
+		Links: []report.LinkResult{
+			{
+				URL:        "https://docs.example.test/old",
+				FetchURL:   "https://docs.example.test/old",
+				FinalURL:   "https://docs.example.test/new",
+				OK:         true,
+				StatusCode: 200,
+			},
+		},
+	}
+
+	issues := Issues(reportData, &baselineReport)
+	byURL := issuesByURL(issues)
+	missing := byURL["https://docs.example.test/missing"]
+	redirect := byURL["https://docs.example.test/old"]
+	if missing == nil || redirect == nil {
+		t.Fatalf("issues = %#v; want missing and redirect", issues)
+	}
 	if len(issues) != 3 {
 		t.Fatalf("Issues() = %#v; want 2 failing issues plus redirect", issues)
 	}
-	if issues[0].Severity != SeverityCritical || issues[0].State != StateNew {
-		t.Fatalf("first issue severity/state = %q/%q; want critical/new", issues[0].Severity, issues[0].State)
+	if missing.Severity != SeverityCritical || missing.State != StateNew {
+		t.Fatalf("missing issue severity/state = %q/%q; want critical/new", missing.Severity, missing.State)
 	}
-	if issues[0].FirstSource != "https://docs.example.test/" {
-		t.Fatalf("first source = %q", issues[0].FirstSource)
+	if redirect.Severity != SeverityInfo || redirect.State != StateExisting {
+		t.Fatalf("redirect issue severity/state = %q/%q; want info/existing", redirect.Severity, redirect.State)
 	}
-	if issues[0].TargetHost != "docs.example.test" {
-		t.Fatalf("target host = %q", issues[0].TargetHost)
+	if missing.FirstSource != "https://docs.example.test/" {
+		t.Fatalf("first source = %q", missing.FirstSource)
+	}
+	if missing.TargetHost != "docs.example.test" {
+		t.Fatalf("target host = %q", missing.TargetHost)
 	}
 
 	summary := Summarize(issues)
-	if summary.Total != 3 || summary.Critical != 1 || summary.Warning != 1 || summary.Info != 1 || summary.New != 1 || summary.Unknown != 2 {
-		t.Fatalf("summary = %#v; want one critical, one warning, one info, one new, two unknown", summary)
+	if summary.Total != 3 || summary.Critical != 1 || summary.Warning != 1 || summary.Info != 1 || summary.New != 2 || summary.Existing != 1 {
+		t.Fatalf("summary = %#v; want one critical, one warning, one info, two new, one existing", summary)
 	}
 
 	problems := GroupByProblem(issues)
@@ -253,4 +271,12 @@ func hasGroup(groups []Group, key string) bool {
 		}
 	}
 	return false
+}
+
+func issuesByURL(issues []Issue) map[string]*Issue {
+	byURL := map[string]*Issue{}
+	for i := range issues {
+		byURL[issues[i].URL] = &issues[i]
+	}
+	return byURL
 }

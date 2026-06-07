@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/cpcf/araneae/internal/baseline"
 	"github.com/cpcf/araneae/internal/report"
 	"github.com/cpcf/araneae/internal/ui"
 )
@@ -65,20 +64,16 @@ func runServeCommand(args []string, stdout io.Writer) error {
 		return err
 	}
 
-	var comparison *baseline.Comparison
+	var baselineReport *report.Report
 	if opts.baselinePath != "" {
-		baselineReport, err := report.Read(opts.baselinePath)
+		parsed, err := report.Read(opts.baselinePath)
 		if err != nil {
 			return err
 		}
-		built := baseline.Compare(&baselineReport, reportData, baseline.Options{
-			IncludeDead:   true,
-			IncludeNon200: true,
-		})
-		comparison = &built
+		baselineReport = &parsed
 	}
 
-	handler, err := ui.NewHandlerWithTriage(reportData, comparison)
+	handler, err := ui.NewHandlerWithTriage(reportData, baselineReport)
 	if err != nil {
 		return err
 	}

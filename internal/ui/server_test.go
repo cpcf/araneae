@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/cpcf/araneae/internal/baseline"
 	"github.com/cpcf/araneae/internal/report"
 )
 
@@ -78,9 +77,7 @@ func TestTriageEndpoint(t *testing.T) {
 		},
 	}
 
-	handler, err := NewHandlerWithTriage(expected, &baseline.Comparison{
-		New: []baseline.Issue{{URL: "https://example.com/missing", Problem: "http_status"}},
-	})
+	handler, err := NewHandlerWithTriage(expected, &report.Report{})
 	if err != nil {
 		t.Fatalf("NewHandler() error = %v", err)
 	}

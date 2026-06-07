@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/cpcf/araneae/internal/baseline"
 	"github.com/cpcf/araneae/internal/report"
 )
 
@@ -90,8 +89,8 @@ type Filter struct {
 	Query      string
 }
 
-func BuildPayload(reportData report.Report, comparison *baseline.Comparison) Payload {
-	issues := Issues(reportData, comparison)
+func BuildPayload(reportData report.Report, baselineReport *report.Report) Payload {
+	issues := Issues(reportData, baselineReport)
 	return Payload{
 		Summary:       Summarize(issues),
 		Issues:        issues,
@@ -102,8 +101,8 @@ func BuildPayload(reportData report.Report, comparison *baseline.Comparison) Pay
 	}
 }
 
-func Issues(reportData report.Report, comparison *baseline.Comparison) []Issue {
-	stateByFingerprint := comparisonStates(comparison)
+func Issues(reportData report.Report, baselineReport *report.Report) []Issue {
+	stateByFingerprint := baselineStates(reportData, baselineReport)
 	issues := make([]Issue, 0)
 	for _, link := range reportData.Links {
 		if !(link.Dead || link.Non200 || isRedirect(link)) {
@@ -371,16 +370,23 @@ func JSON(payload Payload) ([]byte, error) {
 	return json.MarshalIndent(payload, "", "  ")
 }
 
-func comparisonStates(comparison *baseline.Comparison) map[string]IssueState {
+func baselineStates(reportData report.Report, baselineReport *report.Report) map[string]IssueState {
+	if baselineReport == nil {
+		return map[string]IssueState{}
+	}
+
+	baselineFingerprints := map[string]struct{}{}
+	for _, issue := range Issues(*baselineReport, nil) {
+		baselineFingerprints[issue.Fingerprint] = struct{}{}
+	}
+
 	states := map[string]IssueState{}
-	if comparison == nil {
-		return states
-	}
-	for _, issue := range comparison.New {
-		states[Fingerprint(issue.URL, issue.Problem)] = StateNew
-	}
-	for _, issue := range comparison.Existing {
-		states[Fingerprint(issue.URL, issue.Problem)] = StateExisting
+	for _, issue := range Issues(reportData, nil) {
+		if _, ok := baselineFingerprints[issue.Fingerprint]; ok {
+			states[issue.Fingerprint] = StateExisting
+		} else {
+			states[issue.Fingerprint] = StateNew
+		}
 	}
 	return states
 }
