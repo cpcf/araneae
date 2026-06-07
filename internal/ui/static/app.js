@@ -695,11 +695,18 @@ function md(value) {
 }
 
 function csvCell(value) {
-  value = String(value || "");
+  value = safeCSVValue(String(value || ""));
   if (!/[",\n\r]/.test(value)) {
     return value;
   }
   return `"${value.replaceAll("\"", "\"\"")}"`;
+}
+
+function safeCSVValue(value) {
+  if (/^[=+\-@]/.test(value.trimStart())) {
+    return `'${value}`;
+  }
+  return value;
 }
 
 function escapeText(value) {

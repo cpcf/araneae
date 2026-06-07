@@ -52,6 +52,7 @@ func TestRunServeHelpWritesUsage(t *testing.T) {
 	assertContainsAll(t, got,
 		"usage: araneae serve <report-path> [flags]",
 		"-addr",
+		"-baseline",
 	)
 }
 

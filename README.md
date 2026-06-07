@@ -474,6 +474,12 @@ The UI is served locally from the Go binary:
 araneae serve report.json
 ```
 
+To mark issues as new or existing, serve the report with the previous baseline report:
+
+```sh
+araneae serve report.json --baseline previous-report.json
+```
+
 It includes:
 
 - Summary metrics.
@@ -486,7 +492,7 @@ It includes:
 - Browser-local acknowledged state keyed by stable issue fingerprints, with a reset action.
 - Copy URL and copy source page actions when browser clipboard support is available.
 
-Acknowledged state is stored only in the current browser through `localStorage`; it is not written back to the report and is not shared with teammates. A typical docs PR triage flow is to open the report, filter to critical new issues first, export the filtered Markdown list into the PR discussion, then acknowledge items locally as they are assigned or intentionally deferred.
+Acknowledged state is stored only in the current browser through `localStorage`; it is not written back to the report and is not shared with teammates. A typical docs PR triage flow is to serve the report with `--baseline`, filter to critical new issues first, export the filtered Markdown list into the PR discussion, then acknowledge items locally as they are assigned or intentionally deferred.
 
 ## Local Test Site
 

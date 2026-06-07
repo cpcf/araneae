@@ -525,8 +525,22 @@ func escapeMarkdown(value string) string {
 }
 
 func csvCell(value string) string {
+	value = safeCSVValue(value)
 	if !strings.ContainsAny(value, "\",\n\r") {
 		return value
 	}
 	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
+}
+
+func safeCSVValue(value string) string {
+	trimmed := strings.TrimLeft(value, " \t\r\n")
+	if trimmed == "" {
+		return value
+	}
+	switch trimmed[0] {
+	case '=', '+', '-', '@':
+		return "'" + value
+	default:
+		return value
+	}
 }

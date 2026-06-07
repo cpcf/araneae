@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/cpcf/araneae/internal/baseline"
 	"github.com/cpcf/araneae/internal/report"
 )
 
@@ -77,7 +78,9 @@ func TestTriageEndpoint(t *testing.T) {
 		},
 	}
 
-	handler, err := NewHandler(expected)
+	handler, err := NewHandlerWithTriage(expected, &baseline.Comparison{
+		New: []baseline.Issue{{URL: "https://example.com/missing", Problem: "http_status"}},
+	})
 	if err != nil {
 		t.Fatalf("NewHandler() error = %v", err)
 	}
@@ -98,6 +101,7 @@ func TestTriageEndpoint(t *testing.T) {
 		Issues []struct {
 			Severity string `json:"severity"`
 			Problem  string `json:"problem"`
+			State    string `json:"state"`
 		} `json:"issues"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&decoded); err != nil {
@@ -106,7 +110,7 @@ func TestTriageEndpoint(t *testing.T) {
 	if decoded.Summary.Total != 1 || decoded.Summary.Critical != 1 {
 		t.Fatalf("triage summary = %#v; want one critical issue", decoded.Summary)
 	}
-	if len(decoded.Issues) != 1 || decoded.Issues[0].Severity != "critical" || decoded.Issues[0].Problem != "http_status" {
+	if len(decoded.Issues) != 1 || decoded.Issues[0].Severity != "critical" || decoded.Issues[0].Problem != "http_status" || decoded.Issues[0].State != "new" {
 		t.Fatalf("triage issues = %#v", decoded.Issues)
 	}
 }

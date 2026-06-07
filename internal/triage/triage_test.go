@@ -198,12 +198,12 @@ func TestMarkdownAndCSVExports(t *testing.T) {
 		{
 			Severity:    SeverityCritical,
 			State:       StateNew,
-			URL:         "https://docs.example.test/missing|pipe",
+			URL:         "=HYPERLINK(\"https://docs.example.test/missing|pipe\")",
 			Problem:     "http_status",
 			StatusCode:  404,
 			FirstSource: "https://docs.example.test/",
 			SourcePages: 2,
-			Snippets:    []string{"Broken, link"},
+			Snippets:    []string{"=cmd, link"},
 		},
 	}
 
@@ -216,8 +216,11 @@ func TestMarkdownAndCSVExports(t *testing.T) {
 	}
 
 	csv := CSV(issues)
-	if !strings.Contains(csv, `"Broken, link"`) {
+	if !strings.Contains(csv, `"'=cmd, link"`) {
 		t.Fatalf("CSV() = %s; want quoted comma cell", csv)
+	}
+	if !strings.Contains(csv, `"'=HYPERLINK(""https://docs.example.test/missing|pipe"")"`) {
+		t.Fatalf("CSV() = %s; want formula URL escaped", csv)
 	}
 	if !strings.Contains(csv, "severity,state,url,problem,status,first_source,source_count,snippets") {
 		t.Fatalf("CSV() = %s; want header", csv)

@@ -8,17 +8,20 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/cpcf/araneae/internal/baseline"
 	"github.com/cpcf/araneae/internal/report"
 	"github.com/cpcf/araneae/internal/ui"
 )
 
 type serveOptions struct {
-	reportPath string
-	addr       string
+	reportPath   string
+	addr         string
+	baselinePath string
 }
 
 func registerServeFlags(fs *flag.FlagSet, opts *serveOptions) {
 	fs.StringVar(&opts.addr, "addr", "127.0.0.1:0", "local listen address")
+	fs.StringVar(&opts.baselinePath, "baseline", "", "previous JSON report to annotate new and existing triage issues")
 }
 
 func ParseServeArgs(args []string) (serveOptions, error) {
@@ -62,7 +65,20 @@ func runServeCommand(args []string, stdout io.Writer) error {
 		return err
 	}
 
-	handler, err := ui.NewHandler(reportData)
+	var comparison *baseline.Comparison
+	if opts.baselinePath != "" {
+		baselineReport, err := report.Read(opts.baselinePath)
+		if err != nil {
+			return err
+		}
+		built := baseline.Compare(&baselineReport, reportData, baseline.Options{
+			IncludeDead:   true,
+			IncludeNon200: true,
+		})
+		comparison = &built
+	}
+
+	handler, err := ui.NewHandlerWithTriage(reportData, comparison)
 	if err != nil {
 		return err
 	}

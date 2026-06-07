@@ -662,7 +662,7 @@ func TestParseCheckArgsRejectsInvalidFailOn(t *testing.T) {
 }
 
 func TestParseServeArgsAcceptsFlagsAfterReportPath(t *testing.T) {
-	opts, err := ParseServeArgs([]string{"report.json", "--addr", "127.0.0.1:9000"})
+	opts, err := ParseServeArgs([]string{"report.json", "--addr", "127.0.0.1:9000", "--baseline", "previous.json"})
 	if err != nil {
 		t.Fatalf("ParseServeArgs() error = %v", err)
 	}
@@ -672,5 +672,8 @@ func TestParseServeArgsAcceptsFlagsAfterReportPath(t *testing.T) {
 	}
 	if opts.addr != "127.0.0.1:9000" {
 		t.Fatalf("addr = %q", opts.addr)
+	}
+	if opts.baselinePath != "previous.json" {
+		t.Fatalf("baselinePath = %q", opts.baselinePath)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 
+	"github.com/cpcf/araneae/internal/baseline"
 	"github.com/cpcf/araneae/internal/report"
 	"github.com/cpcf/araneae/internal/triage"
 )
@@ -16,6 +17,10 @@ import (
 var staticFS embed.FS
 
 func NewHandler(reportData report.Report) (http.Handler, error) {
+	return NewHandlerWithTriage(reportData, nil)
+}
+
+func NewHandlerWithTriage(reportData report.Report, comparison *baseline.Comparison) (http.Handler, error) {
 	subFS, err := fs.Sub(staticFS, "static")
 	if err != nil {
 		return nil, fmt.Errorf("resolve ui assets: %w", err)
@@ -23,7 +28,7 @@ func NewHandler(reportData report.Report) (http.Handler, error) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/report", reportEndpoint(reportData))
-	mux.HandleFunc("/api/triage", triageEndpoint(reportData))
+	mux.HandleFunc("/api/triage", triageEndpoint(reportData, comparison))
 	mux.Handle("/", http.FileServer(http.FS(subFS)))
 	return mux, nil
 }
@@ -42,8 +47,8 @@ func reportEndpoint(reportData report.Report) http.HandlerFunc {
 	}
 }
 
-func triageEndpoint(reportData report.Report) http.HandlerFunc {
-	payload := triage.BuildPayload(reportData, nil)
+func triageEndpoint(reportData report.Report, comparison *baseline.Comparison) http.HandlerFunc {
+	payload := triage.BuildPayload(reportData, comparison)
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
