@@ -171,27 +171,35 @@ func samePath(a, b string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return canonicalA == canonicalB, nil
+	if canonicalA.path == canonicalB.path {
+		return true, nil
+	}
+	return canonicalA.caseInsensitive && canonicalB.caseInsensitive && strings.EqualFold(canonicalA.path, canonicalB.path), nil
 }
 
-func canonicalPath(path string) (string, error) {
+type canonicalCheckPath struct {
+	path            string
+	caseInsensitive bool
+}
+
+func canonicalPath(path string) (canonicalCheckPath, error) {
 	return canonicalPathDepth(path, 0)
 }
 
-func canonicalPathDepth(path string, depth int) (string, error) {
+func canonicalPathDepth(path string, depth int) (canonicalCheckPath, error) {
 	if depth > 32 {
-		return "", fmt.Errorf("too many symlinks resolving %q", path)
+		return canonicalCheckPath{}, fmt.Errorf("too many symlinks resolving %q", path)
 	}
 
 	abs, err := filepath.Abs(path)
 	if err != nil {
-		return "", err
+		return canonicalCheckPath{}, err
 	}
 	info, err := os.Lstat(abs)
 	if err == nil && info.Mode()&os.ModeSymlink != 0 {
 		target, err := os.Readlink(abs)
 		if err != nil {
-			return "", err
+			return canonicalCheckPath{}, err
 		}
 		if !filepath.IsAbs(target) {
 			target = filepath.Join(filepath.Dir(abs), target)
@@ -199,15 +207,78 @@ func canonicalPathDepth(path string, depth int) (string, error) {
 		return canonicalPathDepth(target, depth+1)
 	}
 	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-		return resolved, nil
+		return newCanonicalCheckPath(resolved), nil
 	}
 
 	parent := filepath.Dir(abs)
 	resolvedParent, err := filepath.EvalSymlinks(parent)
 	if err != nil {
-		return filepath.Clean(abs), nil
+		return newCanonicalCheckPath(filepath.Clean(abs)), nil
 	}
-	return filepath.Join(resolvedParent, filepath.Base(abs)), nil
+	return newCanonicalCheckPath(filepath.Join(resolvedParent, filepath.Base(abs))), nil
+}
+
+func newCanonicalCheckPath(path string) canonicalCheckPath {
+	return canonicalCheckPath{
+		path:            path,
+		caseInsensitive: pathParentCaseInsensitive(path),
+	}
+}
+
+func pathParentCaseInsensitive(path string) bool {
+	parent := filepath.Dir(path)
+	dir := nearestExistingDir(parent)
+	if dir == "" {
+		return false
+	}
+	return existingDirCaseInsensitive(dir)
+}
+
+func nearestExistingDir(path string) string {
+	for {
+		info, err := os.Stat(path)
+		if err == nil && info.IsDir() {
+			return path
+		}
+		parent := filepath.Dir(path)
+		if parent == path {
+			return ""
+		}
+		path = parent
+	}
+}
+
+func existingDirCaseInsensitive(dir string) bool {
+	for {
+		alternateBase, ok := alternateCase(filepath.Base(dir))
+		if ok {
+			info, err := os.Stat(dir)
+			alternateInfo, alternateErr := os.Stat(filepath.Join(filepath.Dir(dir), alternateBase))
+			return err == nil && alternateErr == nil && os.SameFile(info, alternateInfo)
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
+	}
+}
+
+func alternateCase(name string) (string, bool) {
+	var changed bool
+	alternate := []byte(name)
+	for i, ch := range alternate {
+		switch {
+		case 'a' <= ch && ch <= 'z':
+			alternate[i] = ch - ('a' - 'A')
+			changed = true
+		case 'A' <= ch && ch <= 'Z':
+			alternate[i] = ch + ('a' - 'A')
+			changed = true
+		}
+	}
+	return string(alternate), changed
 }
 
 func readBaselineReport(path string) (*report.Report, error) {

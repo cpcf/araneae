@@ -697,6 +697,135 @@ func TestRunCheckRejectsGithubStepSummaryCollisions(t *testing.T) {
 	})
 }
 
+func TestRunCheckRejectsCaseOnlyPathAliasesOnCaseInsensitiveFilesystems(t *testing.T) {
+	current := report.Report{
+		EntryURL: "https://docs.example.com/",
+		Summary:  report.ReportSummary{DeadLinks: 1},
+		Links: []report.LinkResult{
+			{
+				URL:      "https://docs.example.com/new",
+				FetchURL: "https://docs.example.com/new",
+				Dead:     true,
+				Problem:  "network_error",
+			},
+		},
+	}
+	restore := stubCrawlRun(t, current)
+	defer restore()
+
+	t.Run("baseline and out", func(t *testing.T) {
+		dir := t.TempDir()
+		requireCaseInsensitiveDir(t, dir)
+
+		outPath := filepath.Join(dir, "report.json")
+		baselinePath := filepath.Join(dir, "REPORT.json")
+		err := runCheck(checkOptions{
+			scan: scanOptions{
+				entryURL: "https://docs.example.com/",
+				out:      outPath,
+			},
+			policy: checkeval.Options{
+				FailOnDead: true,
+				FailMode:   checkeval.FailModeNew,
+			},
+			baselinePath:  baselinePath,
+			summaryFormat: "text",
+		}, io.Discard, nil)
+		if err == nil {
+			t.Fatal("runCheck() error = nil; want case-only path collision error")
+		}
+		if !strings.Contains(err.Error(), "--baseline") || !strings.Contains(err.Error(), "--out") {
+			t.Fatalf("error = %q; want baseline/out collision", err)
+		}
+		if _, statErr := os.Stat(outPath); !os.IsNotExist(statErr) {
+			t.Fatalf("out path was created before collision error: %v", statErr)
+		}
+	})
+
+	t.Run("comparison and out", func(t *testing.T) {
+		dir := t.TempDir()
+		requireCaseInsensitiveDir(t, dir)
+
+		outPath := filepath.Join(dir, "report.json")
+		comparisonPath := filepath.Join(dir, "REPORT.json")
+		err := runCheck(checkOptions{
+			scan: scanOptions{
+				entryURL: "https://docs.example.com/",
+				out:      outPath,
+			},
+			policy: checkeval.Options{
+				FailOnDead: true,
+				FailMode:   checkeval.FailModeNew,
+			},
+			comparisonOut: comparisonPath,
+			summaryFormat: "text",
+		}, io.Discard, nil)
+		if err == nil {
+			t.Fatal("runCheck() error = nil; want case-only path collision error")
+		}
+		if !strings.Contains(err.Error(), "--comparison-out") || !strings.Contains(err.Error(), "--out") {
+			t.Fatalf("error = %q; want comparison/out collision", err)
+		}
+		if _, statErr := os.Stat(outPath); !os.IsNotExist(statErr) {
+			t.Fatalf("out path was created before collision error: %v", statErr)
+		}
+	})
+
+	t.Run("step summary and comparison", func(t *testing.T) {
+		dir := t.TempDir()
+		requireCaseInsensitiveDir(t, dir)
+
+		outPath := filepath.Join(dir, "current.json")
+		comparisonPath := filepath.Join(dir, "summary.md")
+		stepSummaryPath := filepath.Join(dir, "SUMMARY.md")
+		err := runCheck(checkOptions{
+			scan: scanOptions{
+				entryURL: "https://docs.example.com/",
+				out:      outPath,
+			},
+			policy: checkeval.Options{
+				FailOnDead: true,
+				FailMode:   checkeval.FailModeNew,
+			},
+			comparisonOut:     comparisonPath,
+			githubStepSummary: stepSummaryPath,
+			summaryFormat:     "text",
+		}, io.Discard, nil)
+		if err == nil {
+			t.Fatal("runCheck() error = nil; want case-only path collision error")
+		}
+		if !strings.Contains(err.Error(), "--github-step-summary") || !strings.Contains(err.Error(), "--comparison-out") {
+			t.Fatalf("error = %q; want step-summary/comparison collision", err)
+		}
+		if _, statErr := os.Stat(outPath); !os.IsNotExist(statErr) {
+			t.Fatalf("out path was created before collision error: %v", statErr)
+		}
+	})
+}
+
+func requireCaseInsensitiveDir(t *testing.T, dir string) {
+	t.Helper()
+
+	probe := filepath.Join(dir, "CaseProbe")
+	if err := os.WriteFile(probe, []byte("probe"), 0o644); err != nil {
+		t.Fatalf("write case-sensitivity probe: %v", err)
+	}
+	probeInfo, err := os.Stat(probe)
+	if err != nil {
+		t.Fatalf("stat case-sensitivity probe: %v", err)
+	}
+	alternateInfo, err := os.Stat(filepath.Join(dir, "caseprobe"))
+	if os.IsNotExist(err) {
+		t.Skip("filesystem is case-sensitive")
+	}
+	if err != nil {
+		t.Fatalf("stat alternate case-sensitivity probe: %v", err)
+	}
+	if !os.SameFile(probeInfo, alternateInfo) {
+		t.Skip("filesystem is case-sensitive")
+	}
+}
+
 func writeReportFixture(t *testing.T, path string, reportData report.Report) {
 	t.Helper()
 
