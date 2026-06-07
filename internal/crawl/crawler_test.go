@@ -1010,6 +1010,7 @@ func TestCrawlerFetchesSitemapIndexChildrenAndDeduplicatesPages(t *testing.T) {
 	index := "https://docs.example.test/sitemap.xml"
 	childA := "https://docs.example.test/sitemap-a.xml"
 	childB := "https://docs.example.test/sitemap-b.xml"
+	externalChild := "https://external.example.test/sitemap.xml"
 	page := "https://docs.example.test/from-sitemap"
 	fetcher := newSequencedFetcher(map[string][]FetchResult{
 		entry: {{
@@ -1023,7 +1024,7 @@ func TestCrawlerFetchesSitemapIndexChildrenAndDeduplicatesPages(t *testing.T) {
 			StatusCode:  http.StatusOK,
 			FinalURL:    index,
 			ContentType: "application/xml",
-			Body:        []byte(`<sitemapindex><sitemap><loc>` + childA + `</loc></sitemap><sitemap><loc>` + childB + `</loc></sitemap></sitemapindex>`),
+			Body:        []byte(`<sitemapindex><sitemap><loc>` + childA + `</loc></sitemap><sitemap><loc>` + externalChild + `</loc></sitemap><sitemap><loc>` + childB + `</loc></sitemap></sitemapindex>`),
 			CheckedAt:   time.Now().UTC(),
 		}},
 		childA: {{
@@ -1071,6 +1072,9 @@ func TestCrawlerFetchesSitemapIndexChildrenAndDeduplicatesPages(t *testing.T) {
 	}
 	if got := fetcher.requestCount(childB); got != 1 {
 		t.Fatalf("child B requests = %d; want 1", got)
+	}
+	if got := fetcher.requestCount(externalChild); got != 0 {
+		t.Fatalf("external child sitemap requests = %d; want 0", got)
 	}
 	if got := fetcher.requestCount(page); got != 1 {
 		t.Fatalf("page requests = %d; want duplicate sitemap URL fetched once", got)

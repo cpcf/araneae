@@ -135,6 +135,13 @@ func (c *Crawler) sitemapSeeds(ctx context.Context, requestGate requestGate, roo
 			if err != nil {
 				return nil, nil, fmt.Errorf("invalid child sitemap URL %q from %s: %w", child, sitemapURL, err)
 			}
+			decision, err := scope.Check(normalizedChild.FetchURL)
+			if err != nil {
+				return nil, nil, fmt.Errorf("check child sitemap URL %q: %w", normalizedChild.LinkURL, err)
+			}
+			if !decision.Allowed {
+				continue
+			}
 			childSitemaps++
 			if childSitemaps > maxChildSitemaps {
 				return nil, nil, fmt.Errorf("sitemap index exceeds child sitemap limit of %d", maxChildSitemaps)
