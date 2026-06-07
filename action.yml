@@ -115,7 +115,7 @@ runs:
 
     - name: Set up Go for source execution
       if: ${{ steps.install.outputs.mode == 'source' }}
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v6
       with:
         go-version-file: ${{ github.action_path }}/go.mod
         cache-dependency-path: ${{ github.action_path }}/go.sum

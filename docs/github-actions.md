@@ -55,7 +55,7 @@ jobs:
           max-pages: "1000"
           sitemap: https://docs.example.com/sitemap.xml
           fail-on: all
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: araneae-report
@@ -109,7 +109,7 @@ existing, or resolved.
           out: artifacts/araneae-report.json
           baseline: ${{ steps.baseline.outputs.path }}
           fail-on: ${{ steps.baseline.outputs.fail_on }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: araneae-report
@@ -137,7 +137,7 @@ jobs:
   araneae:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Build docs
         run: make docs
       - name: Serve docs
@@ -152,7 +152,7 @@ jobs:
             --fail-on-truncated \
             --summary markdown \
             --ci
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: araneae-report
@@ -185,7 +185,7 @@ jobs:
             --summary markdown \
             --ci
       - name: Upload current report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: araneae-report
           path: |

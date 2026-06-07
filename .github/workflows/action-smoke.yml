@@ -13,7 +13,7 @@ jobs:
   smoke:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           path: araneae
 
@@ -69,7 +69,7 @@ jobs:
           grep -q '"unchanged_ok": 2' "${{ steps.current.outputs['comparison-path'] }}"
 
       - name: Upload smoke reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: araneae-action-smoke
