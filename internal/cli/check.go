@@ -25,6 +25,10 @@ type checkOptions struct {
 }
 
 func ParseCheckArgs(args []string) (checkOptions, error) {
+	return parseCheckArgs(args, os.LookupEnv)
+}
+
+func parseCheckArgs(args []string, lookupEnv envLookup) (checkOptions, error) {
 	const cmd = "check"
 
 	var opts checkOptions
@@ -41,7 +45,9 @@ func ParseCheckArgs(args []string) (checkOptions, error) {
 		fs.StringVar(&opts.baselinePath, "baseline", "", "previous JSON report to compare against")
 		fs.StringVar(&opts.failOn, "fail-on", opts.failOn, "failure mode for link issues: all or new")
 		fs.StringVar(&opts.comparisonOut, "comparison-out", "", "write baseline comparison JSON to this path")
-	})
+	}, func(cfg configFile, setFlags map[string]bool) {
+		applyCheckConfig(&opts, cfg, setFlags)
+	}, lookupEnv)
 	if err != nil {
 		return opts, err
 	}
@@ -67,7 +73,7 @@ func RunCheck(args []string) error {
 }
 
 func runCheckCommand(args []string, stdout io.Writer, getenv func(string) string) error {
-	opts, err := ParseCheckArgs(args)
+	opts, err := parseCheckArgs(args, os.LookupEnv)
 	if err != nil {
 		if helpRequested(err) {
 			return writeHelp(stdout, checkUsage())
@@ -358,8 +364,10 @@ func checkUsage() string {
 	var rawHeaders stringSliceValue
 	var rawSitemapURLs stringSliceValue
 	var opts checkOptions
+	var configPath string
 	opts.summaryFormat = "text"
 	opts.failOn = string(checkeval.FailModeAll)
+	fs.StringVar(&configPath, "config", "", "YAML config path")
 	registerScanFlags(fs, &scan, &rawHeaders, &allowHosts, &rawSitemapURLs)
 	fs.BoolVar(&opts.policy.FailOnDead, "fail-on-dead", false, "exit non-zero when dead links exist")
 	fs.BoolVar(&opts.policy.FailOnNon200, "fail-on-non-200", false, "exit non-zero when non-200 links exist")
@@ -370,5 +378,5 @@ func checkUsage() string {
 	fs.StringVar(&opts.baselinePath, "baseline", "", "previous JSON report to compare against")
 	fs.StringVar(&opts.failOn, "fail-on", opts.failOn, "failure mode for link issues: all or new")
 	fs.StringVar(&opts.comparisonOut, "comparison-out", "", "write baseline comparison JSON to this path")
-	return flagUsage("check", "<entry-url>", fs)
+	return flagUsage("check", "[entry-url]", fs)
 }

@@ -56,6 +56,15 @@ const (
 
 var crawlRun = crawl.Run
 
+type scanFlagState struct {
+	configPath     string
+	setFlags       map[string]bool
+	positionals    []string
+	rawHeaders     []string
+	allowHosts     []string
+	rawSitemapURLs []string
+}
+
 func newScanOptions() scanOptions {
 	return scanOptions{maxSitemapURLs: crawl.DefaultMaxSitemapURLs}
 }
@@ -166,40 +175,84 @@ func registerScanFlags(fs *flag.FlagSet, opts *scanOptions, rawHeaders, allowHos
 	fs.StringVar(&opts.userAgent, "user-agent", "araneae/0.1", "user-agent string")
 }
 
-func parseScanCoreArgs(cmd string, args []string, registerExtra func(*flag.FlagSet, *scanOptions)) (scanOptions, error) {
+func parseScanCoreFlags(cmd string, args []string, opts *scanOptions, registerExtra func(*flag.FlagSet, *scanOptions)) (scanFlagState, error) {
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
-	opts := newScanOptions()
+	var state scanFlagState
 	var allowHosts stringSliceValue
 	var rawHeaders stringSliceValue
 	var rawSitemapURLs stringSliceValue
-	registerScanFlags(fs, &opts, &rawHeaders, &allowHosts, &rawSitemapURLs)
+	fs.StringVar(&state.configPath, "config", "", "YAML config path")
+	registerScanFlags(fs, opts, &rawHeaders, &allowHosts, &rawSitemapURLs)
 	if registerExtra != nil {
-		registerExtra(fs, &opts)
+		registerExtra(fs, opts)
 	}
 
 	orderedArgs, err := interspersePositionals(fs, args)
 	if err != nil {
-		return opts, fmt.Errorf("%s: %w", cmd, err)
+		return state, fmt.Errorf("%s: %w", cmd, err)
 	}
 	if err := fs.Parse(orderedArgs); err != nil {
-		return opts, fmt.Errorf("%s: %w", cmd, sanitizeFlagParseError(err))
+		return state, fmt.Errorf("%s: %w", cmd, sanitizeFlagParseError(err))
 	}
 
-	opts.allowHosts = append(opts.allowHosts, allowHosts...)
-	opts.sitemapURLs, err = parseSitemapURLs(rawSitemapURLs)
+	state.setFlags = flagSet(fs)
+	state.positionals = append(state.positionals, fs.Args()...)
+	state.rawHeaders = append(state.rawHeaders, rawHeaders...)
+	state.allowHosts = append(state.allowHosts, allowHosts...)
+	state.rawSitemapURLs = append(state.rawSitemapURLs, rawSitemapURLs...)
+	return state, nil
+}
+
+func parseScanCoreArgs(cmd string, args []string, registerExtra func(*flag.FlagSet, *scanOptions), applyExtraConfig func(configFile, map[string]bool), lookupEnv envLookup) (scanOptions, error) {
+	opts := newScanOptions()
+	state, err := parseScanCoreFlags(cmd, args, &opts, registerExtra)
+	if err != nil {
+		return opts, err
+	}
+
+	cfg, _, err := loadCLIConfig(state.configPath)
 	if err != nil {
 		return opts, fmt.Errorf("%s: %w", cmd, err)
 	}
-	opts.headers, err = parseRequestHeaders(rawHeaders)
+	if cfg != nil {
+		configHeaders, configAllowHosts, configSitemaps, err := applyScanConfig(&opts, *cfg, state.setFlags, state.positionals, lookupEnv)
+		if err != nil {
+			return opts, fmt.Errorf("%s: %w", cmd, err)
+		}
+		if len(configHeaders) > 0 {
+			state.rawHeaders = configHeaders
+		}
+		if len(configAllowHosts) > 0 {
+			state.allowHosts = configAllowHosts
+		}
+		if len(configSitemaps) > 0 {
+			state.rawSitemapURLs = configSitemaps
+		}
+		if applyExtraConfig != nil {
+			applyExtraConfig(*cfg, state.setFlags)
+		}
+	}
+
+	opts.allowHosts = append(opts.allowHosts, state.allowHosts...)
+	opts.sitemapURLs, err = parseSitemapURLs(state.rawSitemapURLs)
 	if err != nil {
 		return opts, fmt.Errorf("%s: %w", cmd, err)
 	}
-	if fs.NArg() != 1 {
+	opts.headers, err = parseRequestHeaders(state.rawHeaders)
+	if err != nil {
+		return opts, fmt.Errorf("%s: %w", cmd, err)
+	}
+	if len(state.positionals) > 1 {
 		return opts, fmt.Errorf("%s: expected <entry-url>", cmd)
 	}
-	opts.entryURL = fs.Arg(0)
+	if len(state.positionals) == 1 {
+		opts.entryURL = state.positionals[0]
+	}
+	if opts.entryURL == "" {
+		return opts, fmt.Errorf("%s: expected <entry-url>", cmd)
+	}
 
 	parsed, err := url.Parse(opts.entryURL)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
@@ -231,10 +284,14 @@ func parseScanCoreArgs(cmd string, args []string, registerExtra func(*flag.FlagS
 }
 
 func ParseScanArgs(args []string) (scanOptions, error) {
+	return parseScanArgs(args, os.LookupEnv)
+}
+
+func parseScanArgs(args []string, lookupEnv envLookup) (scanOptions, error) {
 	return parseScanCoreArgs("scan", args, func(fs *flag.FlagSet, opts *scanOptions) {
 		fs.BoolVar(&opts.failOnDead, "fail-on-dead", false, "exit non-zero when dead links exist")
 		fs.BoolVar(&opts.failOnNon200, "fail-on-non-200", false, "exit non-zero when non-200 links exist")
-	})
+	}, nil, lookupEnv)
 }
 
 func RunScan(args []string) error {
@@ -276,10 +333,12 @@ func scanUsage() string {
 	var allowHosts stringSliceValue
 	var rawHeaders stringSliceValue
 	var rawSitemapURLs stringSliceValue
+	var configPath string
+	fs.StringVar(&configPath, "config", "", "YAML config path")
 	registerScanFlags(fs, &opts, &rawHeaders, &allowHosts, &rawSitemapURLs)
 	fs.BoolVar(&opts.failOnDead, "fail-on-dead", false, "exit non-zero when dead links exist")
 	fs.BoolVar(&opts.failOnNon200, "fail-on-non-200", false, "exit non-zero when non-200 links exist")
-	return flagUsage("scan", "<entry-url>", fs)
+	return flagUsage("scan", "[entry-url]", fs)
 }
 
 func runScan(opts scanOptions) (report.Report, error) {

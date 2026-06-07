@@ -13,7 +13,8 @@ func TestRunScanHelpWritesUsage(t *testing.T) {
 
 	got := stdout.String()
 	assertContainsAll(t, got,
-		"usage: araneae scan <entry-url> [flags]",
+		"usage: araneae scan [entry-url] [flags]",
+		"-config",
 		"-max-pages",
 		"-sitemap",
 		"-max-sitemap-urls",
@@ -29,7 +30,8 @@ func TestRunCheckHelpWritesUsage(t *testing.T) {
 
 	got := stdout.String()
 	assertContainsAll(t, got,
-		"usage: araneae check <entry-url> [flags]",
+		"usage: araneae check [entry-url] [flags]",
+		"-config",
 		"-max-pages",
 		"-sitemap",
 		"-max-sitemap-urls",

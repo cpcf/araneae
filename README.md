@@ -105,11 +105,12 @@ Flags may appear before or after the positional argument.
 ## Scan Options
 
 ```text
-araneae scan <entry-url> [flags]
+araneae scan [entry-url] [flags]
 ```
 
 Important flags:
 
+- `--config araneae.yaml`: load scan/check options from a YAML config file. If omitted, Araneae uses `araneae.yaml` or `.araneae.yaml` when present.
 - `--out araneae-report.json`: output report path.
 - `--max-pages 500`: maximum number of same-scope fetch URLs to check, including the entry URL.
 - `--timeout 15s`: per-request timeout.
@@ -205,13 +206,14 @@ Use retries only when the target environment has occasional transient failures, 
 ## Check Options
 
 ```text
-araneae check <entry-url> [flags]
+araneae check [entry-url] [flags]
 ```
 
 `check` runs the same crawl as `scan`, writes the same JSON report, prints a concise status summary, and exits non-zero when enabled policy flags fail.
 
 It reuses the scan flags above and adds:
 
+- `--config araneae.yaml`: load scan/check options from a YAML config file. If omitted, Araneae uses `araneae.yaml` or `.araneae.yaml` when present.
 - `--fail-on-dead`: exit non-zero when dead links or missing fragments exist.
 - `--fail-on-non-200`: exit non-zero when any checked link returns a non-200 HTTP status.
 - `--fail-on-truncated`: exit non-zero when `--max-pages` prevents visiting every queued URL.
@@ -251,6 +253,67 @@ araneae check https://preview.example.com/docs/ \
 ```
 
 Baseline issue identity is the normalized report link URL plus the problem value. HTTP status is reported as detail for `http_status` issues, but it is not part of the identity, so the same URL remains an existing issue if the server changes from one non-200 status to another.
+
+## Config File
+
+Use a YAML config file to keep docs-check policy reviewable in the repository and keep CI commands short. Araneae looks for `araneae.yaml` first, then `.araneae.yaml`. Pass `--config path/to/file.yaml` to use an explicit path. CLI flags override config values; for repeatable fields such as `--header`, `--allow-host`, and `--sitemap`, any CLI values replace the config list for that field.
+
+Example `araneae.yaml`:
+
+```yaml
+schema_version: 1
+entry_url: https://docs.example.com/
+out: araneae-report.json
+max_pages: 1000
+timeout: 15s
+concurrency: 8
+max_requests_per_second: 5
+path_prefix: /docs/
+allow_hosts:
+  - https://www.example.com
+sitemaps:
+  - https://docs.example.com/sitemap.xml
+headers:
+  - name: Authorization
+    value_env: DOCS_AUTH_HEADER
+fail_on_dead: true
+fail_on_non_200: true
+fail_on_truncated: true
+fail_on: new
+baseline: araneae-baseline.json
+comparison_out: araneae-comparison.json
+summary: markdown
+ci: true
+```
+
+Run it locally or in CI:
+
+```sh
+araneae check --config araneae.yaml
+```
+
+`entry_url` may be provided by the config file, so the positional entry URL is optional when config supplies it. Durations use Go-style strings such as `15s`, `500ms`, and `1m`. Unknown config fields are rejected so misspelled policy does not silently pass.
+
+Headers can use literal values or environment-backed values:
+
+```yaml
+headers:
+  - name: Authorization
+    value_env: DOCS_AUTH_HEADER
+  - name: X-Preview
+    value: enabled
+```
+
+`value_env` reads the named environment variable at runtime and errors if it is not set. Resolved header values are passed through the same validation as `--header`, are not printed in parser errors, and are not written to the JSON report.
+
+Minimal config-based GitHub Actions step:
+
+```yaml
+      - name: Check docs links
+        run: araneae check --config araneae.yaml
+        env:
+          DOCS_AUTH_HEADER: Bearer ${{ secrets.DOCS_PREVIEW_TOKEN }}
+```
 
 ### GitHub Action
 
