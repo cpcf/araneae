@@ -263,6 +263,7 @@ func (c *Crawler) Run(ctx context.Context) (report.Report, error) {
 			recordLink(seed.source, LinkOccurrence{
 				LinkURL:  seed.linkURL,
 				FetchURL: seed.fetchURL,
+				Fragment: seed.fragment,
 				Text:     "sitemap",
 			}, ScopeDecision{Allowed: true})
 		}

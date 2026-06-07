@@ -35,6 +35,7 @@ type sitemapIndex struct {
 type sitemapSeed struct {
 	linkURL  string
 	fetchURL string
+	fragment string
 	source   string
 }
 
@@ -164,11 +165,12 @@ func (c *Crawler) sitemapSeeds(ctx context.Context, requestGate requestGate, roo
 				continue
 			}
 			if len(seeds) >= maxURLs {
-				return nil, nil, fmt.Errorf("sitemap page URL count exceeds --max-sitemap-urls limit of %d", maxURLs)
+				continue
 			}
 			seeds = append(seeds, sitemapSeed{
 				linkURL:  normalizedPage.LinkURL,
 				fetchURL: normalizedPage.FetchURL,
+				fragment: linkFragment(normalizedPage.LinkURL),
 				source:   sitemapURL,
 			})
 		}
@@ -197,6 +199,13 @@ func (c *Crawler) fetchSitemap(ctx context.Context, requestGate requestGate, sit
 		return sitemapDocument{}, fmt.Errorf("parse sitemap %s: %w", sitemapURL, err)
 	}
 	return document, nil
+}
+
+func linkFragment(linkURL string) string {
+	if idx := strings.IndexByte(linkURL, '#'); idx != -1 && idx+1 < len(linkURL) {
+		return linkURL[idx+1:]
+	}
+	return ""
 }
 
 func (c *Crawler) fetchBodyWithRetries(ctx context.Context, requestGate requestGate, fetchURL string) (FetchResult, error) {

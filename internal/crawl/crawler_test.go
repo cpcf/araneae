@@ -926,12 +926,16 @@ func TestCrawlerSeedsSitemapURLsWithHeadersAndScope(t *testing.T) {
 			w.Header().Set("Content-Type", "application/xml")
 			_, _ = w.Write([]byte(`<urlset>
 				<url><loc>` + serverURL + `/docs/orphan</loc></url>
+				<url><loc>` + serverURL + `/docs/fragment#missing</loc></url>
 				<url><loc>` + serverURL + `/outside</loc></url>
 				<url><loc>https://external.example.test/docs/external</loc></url>
 			</urlset>`))
 		case "/docs/orphan":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			_, _ = w.Write([]byte(`<a href="/docs/broken">Broken</a>`))
+		case "/docs/fragment":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(`<h1 id="present">Fragment target</h1>`))
 		case "/docs/broken":
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte("missing"))
@@ -984,6 +988,11 @@ func TestCrawlerSeedsSitemapURLsWithHeadersAndScope(t *testing.T) {
 	broken := findLinkByURL(reportData, server.URL+"/docs/broken")
 	if broken == nil || !broken.Dead || broken.Problem != "http_status" {
 		t.Fatalf("broken link = %#v; want dead http_status from sitemap-seeded page", broken)
+	}
+
+	fragment := findLinkByURL(reportData, server.URL+"/docs/fragment#missing")
+	if fragment == nil || !fragment.Dead || fragment.Problem != "missing_fragment" {
+		t.Fatalf("fragment link = %#v; want dead missing_fragment from sitemap loc", fragment)
 	}
 
 	outside := findSkippedByURL(reportData, server.URL+"/outside")
@@ -1071,9 +1080,11 @@ func TestCrawlerFetchesSitemapIndexChildrenAndDeduplicatesPages(t *testing.T) {
 	}
 }
 
-func TestCrawlerRejectsTooManySitemapPageURLs(t *testing.T) {
+func TestCrawlerCapsSitemapPageURLs(t *testing.T) {
 	entry := "https://docs.example.test/"
 	sitemapURL := "https://docs.example.test/sitemap.xml"
+	firstPage := "https://docs.example.test/one"
+	secondPage := "https://docs.example.test/two"
 	fetcher := newSequencedFetcher(map[string][]FetchResult{
 		entry: {{
 			StatusCode:  http.StatusOK,
@@ -1086,12 +1097,19 @@ func TestCrawlerRejectsTooManySitemapPageURLs(t *testing.T) {
 			StatusCode:  http.StatusOK,
 			FinalURL:    sitemapURL,
 			ContentType: "application/xml",
-			Body:        []byte(`<urlset><url><loc>https://docs.example.test/one</loc></url><url><loc>https://docs.example.test/two</loc></url></urlset>`),
+			Body:        []byte(`<urlset><url><loc>` + firstPage + `</loc></url><url><loc>` + secondPage + `</loc></url></urlset>`),
+			CheckedAt:   time.Now().UTC(),
+		}},
+		firstPage: {{
+			StatusCode:  http.StatusOK,
+			FinalURL:    firstPage,
+			ContentType: "text/html; charset=utf-8",
+			Body:        []byte("<p>first</p>"),
 			CheckedAt:   time.Now().UTC(),
 		}},
 	})
 
-	_, err := Run(context.Background(), ScanOptions{
+	reportData, err := Run(context.Background(), ScanOptions{
 		EntryURL:       entry,
 		MaxPages:       10,
 		Timeout:        2 * time.Second,
@@ -1101,11 +1119,21 @@ func TestCrawlerRejectsTooManySitemapPageURLs(t *testing.T) {
 		SitemapURLs:    []string{sitemapURL},
 		MaxSitemapURLs: 1,
 	})
-	if err == nil {
-		t.Fatal("run scanner error = nil; want sitemap URL limit error")
+	if err != nil {
+		t.Fatalf("run scanner: %v", err)
 	}
-	if !strings.Contains(err.Error(), "--max-sitemap-urls") {
-		t.Fatalf("run scanner error = %v; want max sitemap URL limit", err)
+
+	if findLinkByURL(reportData, firstPage) == nil {
+		t.Fatalf("first sitemap page was not recorded")
+	}
+	if findLinkByURL(reportData, secondPage) != nil {
+		t.Fatalf("second sitemap page exceeded cap but was recorded")
+	}
+	if got := fetcher.requestCount(firstPage); got != 1 {
+		t.Fatalf("first page fetches = %d; want 1", got)
+	}
+	if got := fetcher.requestCount(secondPage); got != 0 {
+		t.Fatalf("second page fetches = %d; want capped URL not fetched", got)
 	}
 }
 
