@@ -322,6 +322,122 @@ func TestRunCheckFailOnNewFailsNewIssueAndWritesComparison(t *testing.T) {
 	}
 }
 
+func TestRunCheckRejectsBaselineOutCollisionBeforeWriting(t *testing.T) {
+	restore := stubCrawlRun(t, report.Report{
+		EntryURL: "https://docs.example.com/",
+		Summary:  report.ReportSummary{DeadLinks: 1},
+		Links: []report.LinkResult{
+			{
+				URL:      "https://docs.example.com/new",
+				FetchURL: "https://docs.example.com/new",
+				Dead:     true,
+				Problem:  "network_error",
+			},
+		},
+	})
+	defer restore()
+
+	dir := t.TempDir()
+	reportPath := filepath.Join(dir, "report.json")
+	err := runCheck(checkOptions{
+		scan: scanOptions{
+			entryURL: "https://docs.example.com/",
+			out:      reportPath,
+		},
+		policy: checkeval.Options{
+			FailOnDead: true,
+			FailMode:   checkeval.FailModeNew,
+		},
+		baselinePath:  reportPath,
+		summaryFormat: "text",
+	}, io.Discard, nil)
+	if err == nil {
+		t.Fatal("runCheck() error = nil; want path collision error")
+	}
+	if !strings.Contains(err.Error(), "--baseline") || !strings.Contains(err.Error(), "--out") {
+		t.Fatalf("error = %q; want baseline/out collision", err)
+	}
+	if _, statErr := os.Stat(reportPath); !os.IsNotExist(statErr) {
+		t.Fatalf("report path was created before collision error: %v", statErr)
+	}
+}
+
+func TestRunCheckRejectsComparisonOutCollisions(t *testing.T) {
+	current := report.Report{
+		EntryURL: "https://docs.example.com/",
+		Summary:  report.ReportSummary{DeadLinks: 1},
+		Links: []report.LinkResult{
+			{
+				URL:      "https://docs.example.com/new",
+				FetchURL: "https://docs.example.com/new",
+				Dead:     true,
+				Problem:  "network_error",
+			},
+		},
+	}
+	restore := stubCrawlRun(t, current)
+	defer restore()
+
+	tests := []struct {
+		name          string
+		collision     string
+		wantSubstring string
+	}{
+		{name: "with out", collision: "out", wantSubstring: "--out"},
+		{name: "with baseline", collision: "baseline", wantSubstring: "--baseline"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			outPath := filepath.Join(dir, "current.json")
+			baselinePath := filepath.Join(dir, "baseline.json")
+			comparisonPath := filepath.Join(dir, "comparison.json")
+			writeReportFixture(t, baselinePath, current)
+
+			switch tt.collision {
+			case "out":
+				comparisonPath = outPath
+			case "baseline":
+				comparisonPath = baselinePath
+			}
+
+			err := runCheck(checkOptions{
+				scan: scanOptions{
+					entryURL: "https://docs.example.com/",
+					out:      outPath,
+				},
+				policy: checkeval.Options{
+					FailOnDead: true,
+					FailMode:   checkeval.FailModeNew,
+				},
+				baselinePath:  baselinePath,
+				comparisonOut: comparisonPath,
+				summaryFormat: "text",
+			}, io.Discard, nil)
+			if err == nil {
+				t.Fatal("runCheck() error = nil; want path collision error")
+			}
+			if !strings.Contains(err.Error(), "--comparison-out") || !strings.Contains(err.Error(), tt.wantSubstring) {
+				t.Fatalf("error = %q; want comparison collision with %s", err, tt.wantSubstring)
+			}
+
+			data, readErr := os.ReadFile(baselinePath)
+			if readErr != nil {
+				t.Fatalf("read baseline: %v", readErr)
+			}
+			if !strings.Contains(string(data), `"dead_links": 1`) {
+				t.Fatalf("baseline was overwritten: %s", data)
+			}
+			if tt.collision == "out" {
+				if _, statErr := os.Stat(outPath); !os.IsNotExist(statErr) {
+					t.Fatalf("out path was created before collision error: %v", statErr)
+				}
+			}
+		})
+	}
+}
+
 func writeReportFixture(t *testing.T, path string, reportData report.Report) {
 	t.Helper()
 

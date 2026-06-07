@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/cpcf/araneae/internal/baseline"
@@ -77,6 +78,14 @@ func runCheckCommand(args []string, stdout io.Writer, getenv func(string) string
 }
 
 func runCheck(opts checkOptions, stdout io.Writer, getenv func(string) string) error {
+	if err := validateCheckOutputPaths(opts); err != nil {
+		return err
+	}
+	baselineReport, err := readBaselineReport(opts.baselinePath)
+	if err != nil {
+		return err
+	}
+
 	reportData, err := runScan(opts.scan)
 	if err != nil {
 		return err
@@ -85,10 +94,7 @@ func runCheck(opts checkOptions, stdout io.Writer, getenv func(string) string) e
 		return err
 	}
 
-	comparison, err := buildComparison(opts, reportData)
-	if err != nil {
-		return err
-	}
+	comparison := buildComparison(opts, baselineReport, reportData)
 	if comparison != nil {
 		opts.policy.Comparison = comparison
 		if opts.comparisonOut != "" {
@@ -112,25 +118,49 @@ func runCheck(opts checkOptions, stdout io.Writer, getenv func(string) string) e
 	return result.Err()
 }
 
-func buildComparison(opts checkOptions, reportData report.Report) (*baseline.Comparison, error) {
-	if opts.baselinePath == "" && opts.comparisonOut == "" && opts.policy.FailMode != checkeval.FailModeNew {
+func validateCheckOutputPaths(opts checkOptions) error {
+	if opts.baselinePath != "" && samePath(opts.scan.out, opts.baselinePath) {
+		return fmt.Errorf("check: --baseline must not be the same path as --out")
+	}
+	if opts.comparisonOut != "" && samePath(opts.scan.out, opts.comparisonOut) {
+		return fmt.Errorf("check: --comparison-out must not be the same path as --out")
+	}
+	if opts.baselinePath != "" && opts.comparisonOut != "" && samePath(opts.baselinePath, opts.comparisonOut) {
+		return fmt.Errorf("check: --comparison-out must not be the same path as --baseline")
+	}
+	return nil
+}
+
+func samePath(a, b string) bool {
+	absA, errA := filepath.Abs(a)
+	absB, errB := filepath.Abs(b)
+	if errA == nil && errB == nil {
+		return absA == absB
+	}
+	return filepath.Clean(a) == filepath.Clean(b)
+}
+
+func readBaselineReport(path string) (*report.Report, error) {
+	if path == "" {
 		return nil, nil
 	}
+	parsed, err := report.Read(path)
+	if err != nil {
+		return nil, err
+	}
+	return &parsed, nil
+}
 
-	var baselineReport *report.Report
-	if opts.baselinePath != "" {
-		parsed, err := report.Read(opts.baselinePath)
-		if err != nil {
-			return nil, err
-		}
-		baselineReport = &parsed
+func buildComparison(opts checkOptions, baselineReport *report.Report, reportData report.Report) *baseline.Comparison {
+	if opts.baselinePath == "" && opts.comparisonOut == "" && opts.policy.FailMode != checkeval.FailModeNew {
+		return nil
 	}
 
 	comparison := baseline.Compare(baselineReport, reportData, baseline.Options{
 		IncludeDead:   opts.policy.FailOnDead,
 		IncludeNon200: opts.policy.FailOnNon200,
 	})
-	return &comparison, nil
+	return &comparison
 }
 
 func writeComparisonFile(path string, comparison baseline.Comparison) error {
