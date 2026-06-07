@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/cpcf/araneae/internal/report"
+	"github.com/cpcf/araneae/internal/triage"
 )
 
 //go:embed static/*
@@ -22,6 +23,7 @@ func NewHandler(reportData report.Report) (http.Handler, error) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/report", reportEndpoint(reportData))
+	mux.HandleFunc("/api/triage", triageEndpoint(reportData))
 	mux.Handle("/", http.FileServer(http.FS(subFS)))
 	return mux, nil
 }
@@ -36,6 +38,21 @@ func reportEndpoint(reportData report.Report) http.HandlerFunc {
 		enc := json.NewEncoder(w)
 		if err := enc.Encode(reportData); err != nil {
 			http.Error(w, "failed to encode report", http.StatusInternalServerError)
+		}
+	}
+}
+
+func triageEndpoint(reportData report.Report) http.HandlerFunc {
+	payload := triage.BuildPayload(reportData, nil)
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		enc := json.NewEncoder(w)
+		if err := enc.Encode(payload); err != nil {
+			http.Error(w, "failed to encode triage payload", http.StatusInternalServerError)
 		}
 	}
 }

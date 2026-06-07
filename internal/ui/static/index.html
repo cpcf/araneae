@@ -29,9 +29,46 @@
           </select>
         </label>
         <label class="control">
+          <span>Severity</span>
+          <select id="severity-select">
+            <option value="" selected>All severities</option>
+            <option value="critical">Critical</option>
+            <option value="warning">Warning</option>
+            <option value="info">Info</option>
+          </select>
+        </label>
+        <label class="control">
+          <span>Problem</span>
+          <select id="problem-select">
+            <option value="" selected>All problems</option>
+          </select>
+        </label>
+        <label class="control">
+          <span>Target host</span>
+          <select id="host-select">
+            <option value="" selected>All hosts</option>
+          </select>
+        </label>
+        <label class="control">
+          <span>Source page</span>
+          <select id="source-select">
+            <option value="" selected>All sources</option>
+          </select>
+        </label>
+        <label class="control">
+          <span>State</span>
+          <select id="state-select">
+            <option value="" selected>All states</option>
+            <option value="new">New</option>
+            <option value="existing">Existing</option>
+            <option value="unknown">Unknown</option>
+          </select>
+        </label>
+        <label class="control">
           <span>Sort</span>
           <select id="sort-select">
             <option value="status" selected>Status</option>
+            <option value="severity">Severity</option>
             <option value="count-desc">Count (high to low)</option>
             <option value="count-asc">Count (low to high)</option>
             <option value="url">URL</option>
@@ -43,6 +80,13 @@
           <span>Search</span>
           <input id="search-input" type="search" placeholder="Search URL or source URL" />
         </label>
+        <label class="check-control">
+          <input id="hide-acknowledged" type="checkbox" />
+          <span>Hide acknowledged</span>
+        </label>
+        <button id="export-markdown" class="btn" type="button">Export Markdown</button>
+        <button id="export-csv" class="btn" type="button">Export CSV</button>
+        <button id="reset-acknowledged" class="btn" type="button">Reset local state</button>
       </section>
 
       <section class="metrics" aria-live="polite">
@@ -70,10 +114,23 @@
           <h2>OK</h2>
           <p id="metric-ok">0</p>
         </article>
+        <article class="metric">
+          <h2>Critical</h2>
+          <p id="metric-critical">0</p>
+        </article>
+        <article class="metric">
+          <h2>Warnings</h2>
+          <p id="metric-warning">0</p>
+        </article>
+        <article class="metric">
+          <h2>Acknowledged</h2>
+          <p id="metric-acknowledged">0</p>
+        </article>
       </section>
 
       <section class="panel">
         <div id="summary" class="summary"></div>
+        <div id="triage-groups" class="triage-groups"></div>
         <div id="links-view">
           <div class="table-scroll">
             <table class="table">

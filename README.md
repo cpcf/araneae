@@ -477,13 +477,16 @@ araneae serve report.json
 It includes:
 
 - Summary metrics.
-- Problem links sorted by severity.
-- All links table with status filters.
+- Problem links with severity, problem type, target host, source page, and baseline state filters.
 - Skipped links table.
 - Search by link URL or source page.
-- Sorting by count, status, URL, and source count.
+- Sorting by severity, count, status, URL, and source count.
 - Link detail with sources, snippets, redirect chain, final URL, content type, and error details.
+- Markdown and CSV exports for the currently filtered triage issue list.
+- Browser-local acknowledged state keyed by stable issue fingerprints, with a reset action.
 - Copy URL and copy source page actions when browser clipboard support is available.
+
+Acknowledged state is stored only in the current browser through `localStorage`; it is not written back to the report and is not shared with teammates. A typical docs PR triage flow is to open the report, filter to critical new issues first, export the filtered Markdown list into the PR discussion, then acknowledge items locally as they are assigned or intentionally deferred.
 
 ## Local Test Site
 

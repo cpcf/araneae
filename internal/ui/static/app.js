@@ -1,6 +1,12 @@
 const filterSelect = document.getElementById("filter-select");
+const severitySelect = document.getElementById("severity-select");
+const problemSelect = document.getElementById("problem-select");
+const hostSelect = document.getElementById("host-select");
+const sourceSelect = document.getElementById("source-select");
+const stateSelect = document.getElementById("state-select");
 const sortSelect = document.getElementById("sort-select");
 const searchInput = document.getElementById("search-input");
+const hideAcknowledgedInput = document.getElementById("hide-acknowledged");
 const linksTbody = document.getElementById("links-tbody");
 const skippedTbody = document.getElementById("skipped-tbody");
 const linksView = document.getElementById("links-view");
@@ -10,8 +16,12 @@ const skippedEmpty = document.getElementById("skipped-empty");
 const detailEmpty = document.getElementById("detail-empty");
 const detailContent = document.getElementById("detail-content");
 const summary = document.getElementById("summary");
+const triageGroups = document.getElementById("triage-groups");
 const viewLinksBtn = document.getElementById("view-links");
 const viewSkippedBtn = document.getElementById("view-skipped");
+const exportMarkdownBtn = document.getElementById("export-markdown");
+const exportCSVBtn = document.getElementById("export-csv");
+const resetAcknowledgedBtn = document.getElementById("reset-acknowledged");
 const linksDetailURL = document.getElementById("detail-url");
 const linksDetailFetch = document.getElementById("detail-fetch");
 const linksDetailStatusCode = document.getElementById("detail-status-code");
@@ -28,20 +38,31 @@ const metricDead = document.getElementById("metric-dead");
 const metricNon200 = document.getElementById("metric-non200");
 const metricSkipped = document.getElementById("metric-skipped");
 const metricOk = document.getElementById("metric-ok");
+const metricCritical = document.getElementById("metric-critical");
+const metricWarning = document.getElementById("metric-warning");
+const metricAcknowledged = document.getElementById("metric-acknowledged");
+
+const acknowledgedStorageKey = "araneae.acknowledgedFingerprints";
+const copySupport = Boolean(window.isSecureContext && navigator.clipboard && navigator.clipboard.writeText);
 
 let reportData = null;
+let triageData = null;
+let triageByURL = new Map();
 let fetchesByURL = new Map();
 let selectedLinkURL = "";
-
-const copySupport = Boolean(window.isSecureContext && navigator.clipboard && navigator.clipboard.writeText);
+let acknowledged = loadAcknowledged();
 
 async function main() {
   try {
-    const res = await fetch("/api/report");
-    if (!res.ok) {
-      throw new Error(`failed to load report (${res.status})`);
+    const [reportRes, triageRes] = await Promise.all([fetch("/api/report"), fetch("/api/triage")]);
+    if (!reportRes.ok) {
+      throw new Error(`failed to load report (${reportRes.status})`);
     }
-    reportData = await res.json();
+    if (!triageRes.ok) {
+      throw new Error(`failed to load triage data (${triageRes.status})`);
+    }
+    reportData = await reportRes.json();
+    triageData = await triageRes.json();
   } catch (err) {
     summary.textContent = `Could not load report: ${err.message}`;
     return;
@@ -50,8 +71,11 @@ async function main() {
   reportData.links = reportData.links || [];
   reportData.fetches = reportData.fetches || [];
   reportData.skipped_links = reportData.skipped_links || [];
+  triageData.issues = triageData.issues || [];
 
   fetchesByURL = new Map(reportData.fetches.map((f) => [f.url, f]));
+  triageByURL = new Map(triageData.issues.map((issue) => [issue.url, issue]));
+  populateTriageFilters();
   setMetrics();
   bindControls();
   setView("links");
@@ -65,16 +89,60 @@ function setMetrics() {
   metricNon200.textContent = String(reportData.summary?.non_200_links ?? 0);
   metricSkipped.textContent = String(reportData.summary?.skipped_links ?? 0);
   metricOk.textContent = String(reportData.summary?.ok_links ?? 0);
+  metricCritical.textContent = String(triageData.summary?.critical ?? 0);
+  metricWarning.textContent = String(triageData.summary?.warning ?? 0);
+  metricAcknowledged.textContent = String(acknowledged.size);
   const generated = reportData.generated_at ? new Date(reportData.generated_at).toLocaleString() : "n/a";
   summary.textContent = `Generated ${generated} | entry ${reportData.entry_url || "unknown"} | scope ${reportData.scope?.origin || "unknown"}`;
+  renderTriageGroups();
+}
+
+function populateTriageFilters() {
+  fillSelect(problemSelect, triageData.problem_groups || [], "All problems");
+  fillSelect(hostSelect, triageData.host_groups || [], "All hosts");
+  fillSelect(sourceSelect, triageData.source_groups || [], "All sources");
+}
+
+function fillSelect(select, groups, allLabel) {
+  select.textContent = "";
+  const all = document.createElement("option");
+  all.value = "";
+  all.textContent = allLabel;
+  select.appendChild(all);
+  for (const group of groups) {
+    const option = document.createElement("option");
+    option.value = group.key;
+    option.textContent = `${group.label} (${group.count})`;
+    select.appendChild(option);
+  }
+}
+
+function renderTriageGroups() {
+  const data = triageData.summary || {};
+  triageGroups.innerHTML = `
+    <span class="group-chip critical">Critical ${escapeText(String(data.critical || 0))}</span>
+    <span class="group-chip warning">Warning ${escapeText(String(data.warning || 0))}</span>
+    <span class="group-chip info">Info ${escapeText(String(data.info || 0))}</span>
+    <span class="group-chip">New ${escapeText(String(data.new || 0))}</span>
+    <span class="group-chip">Existing ${escapeText(String(data.existing || 0))}</span>
+  `;
 }
 
 function bindControls() {
-  filterSelect.addEventListener("change", renderAll);
-  sortSelect.addEventListener("change", renderAll);
+  for (const control of [filterSelect, severitySelect, problemSelect, hostSelect, sourceSelect, stateSelect, sortSelect, hideAcknowledgedInput]) {
+    control.addEventListener("change", renderAll);
+  }
   searchInput.addEventListener("input", debounce(renderAll, 120));
   viewLinksBtn.addEventListener("click", () => setView("links"));
   viewSkippedBtn.addEventListener("click", () => setView("skipped"));
+  exportMarkdownBtn.addEventListener("click", () => downloadText("araneae-triage.md", markdownForIssues(currentVisibleIssues()), "text/markdown"));
+  exportCSVBtn.addEventListener("click", () => downloadText("araneae-triage.csv", csvForIssues(currentVisibleIssues()), "text/csv"));
+  resetAcknowledgedBtn.addEventListener("click", () => {
+    acknowledged = new Set();
+    saveAcknowledged();
+    setMetrics();
+    renderAll();
+  });
 }
 
 function setView(view) {
@@ -90,7 +158,6 @@ function renderAll() {
   if (!reportData) {
     return;
   }
-
   if (!linksView.classList.contains("hidden")) {
     renderLinks();
   }
@@ -100,17 +167,13 @@ function renderAll() {
 }
 
 function renderLinks() {
-  const term = (searchInput.value || "").trim().toLowerCase();
-  const filter = filterSelect.value;
-  const sort = sortSelect.value;
-
-  let list = reportData.links.filter((link) => matchesFilter(link, filter, term));
-  list = sortLinks(list, sort);
-
+  const list = sortLinks(filteredLinks(), sortSelect.value);
   linksTbody.textContent = "";
   linksEmpty.classList.toggle("hidden", list.length > 0);
+  preserveSelectedLink(list);
 
   for (const link of list) {
+    const triage = triageByURL.get(link.url);
     const row = document.createElement("tr");
     row.dataset.url = link.url;
     row.classList.toggle("selected", link.url === selectedLinkURL);
@@ -119,6 +182,9 @@ function renderLinks() {
     const sourceCount = Array.isArray(link.sources) ? link.sources.length : 0;
     const copyURLVisible = copySupport ? "" : "hidden";
     const firstSource = firstSourceURL(link.sources);
+    const acknowledgeButton = triage
+      ? `<button class="action-btn acknowledge-btn" type="button" data-fingerprint="${escapeAttribute(triage.fingerprint)}">${acknowledged.has(triage.fingerprint) ? "Unacknowledge" : "Acknowledge"}</button>`
+      : "";
 
     row.innerHTML = `
       <td>
@@ -127,6 +193,7 @@ function renderLinks() {
       </td>
       <td>
         <span class="status ${status.class}">${status.label}</span>
+        ${triageBadgeHTML(triage)}
         ${statusDetailHTML(link)}
       </td>
       <td>
@@ -137,6 +204,7 @@ function renderLinks() {
       <td class="actions">
         <button class="action-btn copy-url-btn" type="button" ${copyURLVisible} data-url="${escapeAttribute(link.url)}">Copy URL</button>
         <button class="action-btn copy-source-btn" type="button" ${copyURLVisible} data-source="${escapeAttribute(firstSource)}" ${firstSource ? "" : "disabled"}>Copy source</button>
+        ${acknowledgeButton}
       </td>
     `;
 
@@ -150,24 +218,51 @@ function renderLinks() {
       event.stopPropagation();
       copyToClipboard(link.url);
     });
-
     row.querySelector(".copy-source-btn").addEventListener("click", (event) => {
       event.stopPropagation();
       copyToClipboard(firstSource);
     });
-
-    row.querySelector(".url-main a").addEventListener("click", (event) => {
-      event.stopPropagation();
-    });
+    const acknowledge = row.querySelector(".acknowledge-btn");
+    if (acknowledge) {
+      acknowledge.addEventListener("click", (event) => {
+        event.stopPropagation();
+        toggleAcknowledged(acknowledge.dataset.fingerprint);
+      });
+    }
+    const anchor = row.querySelector(".url-main a");
+    if (anchor) {
+      anchor.addEventListener("click", (event) => event.stopPropagation());
+    }
 
     linksTbody.appendChild(row);
   }
+}
+
+function filteredLinks() {
+  const term = (searchInput.value || "").trim().toLowerCase();
+  const filter = filterSelect.value;
+  return reportData.links.filter((link) => matchesFilter(link, filter, term) && matchesTriageFilters(link));
 }
 
 function markSelectedLinkRow() {
   for (const row of linksTbody.querySelectorAll("tr")) {
     row.classList.toggle("selected", row.dataset.url === selectedLinkURL);
   }
+}
+
+function preserveSelectedLink(list) {
+  if (!selectedLinkURL) {
+    return;
+  }
+  if (!list.some((link) => link.url === selectedLinkURL)) {
+    clearDetail();
+  }
+}
+
+function clearDetail() {
+  selectedLinkURL = "";
+  detailEmpty.classList.remove("hidden");
+  detailContent.classList.add("hidden");
 }
 
 function renderSkipped() {
@@ -202,15 +297,14 @@ function renderSkipped() {
       event.stopPropagation();
       copyToClipboard(item.url);
     });
-
     row.querySelector(".copy-source-btn").addEventListener("click", (event) => {
       event.stopPropagation();
       copyToClipboard(firstSource);
     });
-
-    row.querySelector(".url-main a").addEventListener("click", (event) => {
-      event.stopPropagation();
-    });
+    const anchor = row.querySelector(".url-main a");
+    if (anchor) {
+      anchor.addEventListener("click", (event) => event.stopPropagation());
+    }
 
     skippedTbody.appendChild(row);
   }
@@ -231,9 +325,7 @@ function renderDetail(link) {
   linksDetailProblem.innerText = link.problem || "none";
   linksDetailError.innerText = fetch.error || "none";
   linksDetailStatus.innerText = status.label;
-  linksDetailRedirect.innerText = (fetch.redirect_chain || []).length
-    ? fetch.redirect_chain.join(" -> ")
-    : "n/a";
+  linksDetailRedirect.innerText = (fetch.redirect_chain || []).length ? fetch.redirect_chain.join(" -> ") : "n/a";
 
   detailSources.textContent = "";
   if (!Array.isArray(link.sources) || link.sources.length === 0) {
@@ -291,7 +383,9 @@ function matchesFilter(link, filter, term) {
     const inFetchURL = (link.fetch_url || "").toLowerCase().includes(term);
     const inFinalURL = (link.final_url || "").toLowerCase().includes(term);
     const inSources = Array.isArray(link.sources) && link.sources.some((source) => sourceMatchesTerm(source, term));
-    if (!inURL && !inFetchURL && !inFinalURL && !inSources) {
+    const issue = triageByURL.get(link.url);
+    const inTriage = issue && [issue.severity, issue.state, issue.problem, issue.target_host].some((value) => (value || "").toLowerCase().includes(term));
+    if (!inURL && !inFetchURL && !inFinalURL && !inSources && !inTriage) {
       return false;
     }
   }
@@ -312,6 +406,23 @@ function matchesFilter(link, filter, term) {
   }
 }
 
+function matchesTriageFilters(link) {
+  const issue = triageByURL.get(link.url);
+  const anyTriageFilter = severitySelect.value || problemSelect.value || hostSelect.value || sourceSelect.value || stateSelect.value;
+  if (!issue) {
+    return !anyTriageFilter;
+  }
+  if (hideAcknowledgedInput.checked && acknowledged.has(issue.fingerprint)) {
+    return false;
+  }
+  if (severitySelect.value && issue.severity !== severitySelect.value) return false;
+  if (problemSelect.value && issue.problem !== problemSelect.value) return false;
+  if (hostSelect.value && issue.target_host !== hostSelect.value) return false;
+  if (sourceSelect.value && !issueHasSource(issue, sourceSelect.value)) return false;
+  if (stateSelect.value && issue.state !== stateSelect.value) return false;
+  return true;
+}
+
 function matchesSkippedSearch(item, term) {
   if (!term) return true;
   const hasURL = (item.url || "").toLowerCase().includes(term);
@@ -325,18 +436,20 @@ function sortLinks(list, sort) {
   copy.sort((a, b) => {
     switch (sort) {
       case "count-asc":
-        return (a.count || 0) - (b.count || 0);
+        return (a.count || 0) - (b.count || 0) || compareURL(a, b);
       case "source-count-asc":
-        return (a.sources?.length || 0) - (b.sources?.length || 0);
+        return (a.sources?.length || 0) - (b.sources?.length || 0) || compareURL(a, b);
       case "source-count-desc":
-        return (b.sources?.length || 0) - (a.sources?.length || 0);
+        return (b.sources?.length || 0) - (a.sources?.length || 0) || compareURL(a, b);
       case "count-desc":
-        return (b.count || 0) - (a.count || 0);
+        return (b.count || 0) - (a.count || 0) || compareURL(a, b);
+      case "severity":
+        return severityWeight(triageByURL.get(a.url)?.severity) - severityWeight(triageByURL.get(b.url)?.severity) || compareURL(a, b);
       case "status":
-        return statusWeight(a) - statusWeight(b) || (a.url || "").localeCompare(b.url || "");
+        return statusWeight(a) - statusWeight(b) || compareURL(a, b);
       case "url":
       default:
-        return (a.url || "").localeCompare(b.url || "");
+        return compareURL(a, b);
     }
   });
   return copy;
@@ -346,20 +459,24 @@ function sortSkipped(list, sort) {
   return [...list].sort((a, b) => {
     switch (sort) {
       case "count-asc":
-        return (a.count || 0) - (b.count || 0);
+        return (a.count || 0) - (b.count || 0) || compareURL(a, b);
       case "count-desc":
-        return (b.count || 0) - (a.count || 0);
+        return (b.count || 0) - (a.count || 0) || compareURL(a, b);
       case "source-count-asc":
-        return (a.sources?.length || 0) - (b.sources?.length || 0);
+        return (a.sources?.length || 0) - (b.sources?.length || 0) || compareURL(a, b);
       case "source-count-desc":
-        return (b.sources?.length || 0) - (a.sources?.length || 0);
+        return (b.sources?.length || 0) - (a.sources?.length || 0) || compareURL(a, b);
       case "status":
-        return (a.reason || "").localeCompare(b.reason || "") || (a.url || "").localeCompare(b.url || "");
+        return (a.reason || "").localeCompare(b.reason || "") || compareURL(a, b);
       case "url":
       default:
-        return (a.url || "").localeCompare(b.url || "");
+        return compareURL(a, b);
     }
   });
+}
+
+function compareURL(a, b) {
+  return (a.url || "").localeCompare(b.url || "");
 }
 
 function statusWeight(link) {
@@ -369,6 +486,13 @@ function statusWeight(link) {
   if (status === "redirecting") return 2;
   if (status === "ok") return 3;
   return 4;
+}
+
+function severityWeight(severity) {
+  if (severity === "critical") return 0;
+  if (severity === "warning") return 1;
+  if (severity === "info") return 2;
+  return 3;
 }
 
 function buildStatus(link) {
@@ -387,6 +511,20 @@ function buildStatus(link) {
   return { label: "unknown", class: "" };
 }
 
+function triageBadgeHTML(issue) {
+  if (!issue) {
+    return "";
+  }
+  const ack = acknowledged.has(issue.fingerprint) ? '<span class="state-badge acknowledged">acknowledged</span>' : "";
+  return `
+    <div class="triage-badges">
+      <span class="severity ${escapeAttribute(issue.severity)}">${escapeText(issue.severity)}</span>
+      <span class="state-badge">${escapeText(issue.state || "unknown")}</span>
+      ${ack}
+    </div>
+  `;
+}
+
 function statusDetailHTML(link) {
   const fetch = fetchesByURL.get(link.fetch_url || "") || {};
   const notes = [];
@@ -394,18 +532,10 @@ function statusDetailHTML(link) {
   const finalURL = link.final_url || fetch.final_url || "";
   const error = fetch.error || link.error || "";
 
-  if (code) {
-    notes.push(`HTTP ${code}`);
-  }
-  if (finalURL && finalURL !== (link.fetch_url || "")) {
-    notes.push(`Final: ${finalURL}`);
-  }
-  if (link.problem) {
-    notes.push(link.problem);
-  }
-  if (error) {
-    notes.push(error);
-  }
+  if (code) notes.push(`HTTP ${code}`);
+  if (finalURL && finalURL !== (link.fetch_url || "")) notes.push(`Final: ${finalURL}`);
+  if (link.problem) notes.push(link.problem);
+  if (error) notes.push(error);
 
   if (!notes.length) {
     return "";
@@ -465,11 +595,111 @@ function sourceMatchesTerm(source, term) {
   return inPage || inText;
 }
 
+function issueHasSource(issue, pageURL) {
+  if ((issue.first_source || "") === pageURL) {
+    return true;
+  }
+  const sources = issue.link?.sources || [];
+  return sources.some((source) => source.page_url === pageURL);
+}
+
+function currentVisibleIssues() {
+  return sortIssuesForExport(filteredLinks().map((link) => triageByURL.get(link.url)).filter(Boolean));
+}
+
+function sortIssuesForExport(issues) {
+  return [...issues].sort((a, b) => {
+    return severityWeight(a.severity) - severityWeight(b.severity) ||
+      (a.problem || "").localeCompare(b.problem || "") ||
+      (a.url || "").localeCompare(b.url || "");
+  });
+}
+
+function markdownForIssues(issues) {
+  const rows = [
+    "| Severity | State | URL | Problem | Status | First source | Sources | Snippets |",
+    "| --- | --- | --- | --- | ---: | --- | ---: | --- |",
+  ];
+  for (const issue of issues) {
+    rows.push(`| ${md(issue.severity)} | ${md(issue.state || "unknown")} | ${md(issue.url)} | ${md(issue.problem)} | ${issue.status_code || ""} | ${md(issue.first_source || "")} | ${issue.source_pages || 0} | ${md((issue.snippets || []).join(" / "))} |`);
+  }
+  return rows.join("\n") + "\n";
+}
+
+function csvForIssues(issues) {
+  const rows = [["severity", "state", "url", "problem", "status", "first_source", "source_count", "snippets"]];
+  for (const issue of issues) {
+    rows.push([
+      issue.severity || "",
+      issue.state || "unknown",
+      issue.url || "",
+      issue.problem || "",
+      issue.status_code ? String(issue.status_code) : "",
+      issue.first_source || "",
+      String(issue.source_pages || 0),
+      (issue.snippets || []).join(" / "),
+    ]);
+  }
+  return rows.map((row) => row.map(csvCell).join(",")).join("\n") + "\n";
+}
+
+function downloadText(filename, text, type) {
+  const blob = new Blob([text], { type: `${type};charset=utf-8` });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function toggleAcknowledged(fingerprint) {
+  if (!fingerprint) {
+    return;
+  }
+  if (acknowledged.has(fingerprint)) {
+    acknowledged.delete(fingerprint);
+  } else {
+    acknowledged.add(fingerprint);
+  }
+  saveAcknowledged();
+  setMetrics();
+  renderAll();
+}
+
+function loadAcknowledged() {
+  try {
+    const raw = window.localStorage?.getItem(acknowledgedStorageKey);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(parsed) ? parsed : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveAcknowledged() {
+  try {
+    window.localStorage?.setItem(acknowledgedStorageKey, JSON.stringify([...acknowledged].sort()));
+  } catch {}
+}
+
 function copyToClipboard(value) {
   if (!copySupport || !value) {
     return;
   }
   navigator.clipboard.writeText(value).catch(() => {});
+}
+
+function md(value) {
+  return String(value || "").replaceAll("\n", " ").replaceAll("|", "\\|");
+}
+
+function csvCell(value) {
+  value = String(value || "");
+  if (!/[",\n\r]/.test(value)) {
+    return value;
+  }
+  return `"${value.replaceAll("\"", "\"\"")}"`;
 }
 
 function escapeText(value) {
