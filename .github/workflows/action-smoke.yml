@@ -1,0 +1,77 @@
+name: araneae-action-smoke
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: araneae
+
+      - name: Verify external workspace shape
+        run: |
+          set -euo pipefail
+          test ! -f go.mod
+          test -d araneae/cmd/araneae
+
+      - name: Serve example site
+        run: |
+          set -euo pipefail
+          python3 -m http.server 8000 --directory araneae/examples/test-site >"$RUNNER_TEMP/araneae-site.log" 2>&1 &
+          echo "$!" >"$RUNNER_TEMP/araneae-site.pid"
+          for _ in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:8000/loop-a.html >/dev/null; then
+              exit 0
+            fi
+            sleep 0.5
+          done
+          cat "$RUNNER_TEMP/araneae-site.log"
+          exit 1
+
+      - id: baseline
+        name: Create baseline report
+        uses: ./araneae
+        with:
+          entry-url: http://127.0.0.1:8000/loop-a.html
+          out: artifacts/baseline/araneae-report.json
+          max-pages: "5"
+          fail-on: all
+
+      - id: current
+        name: Check against baseline
+        uses: ./araneae
+        with:
+          entry-url: http://127.0.0.1:8000/loop-a.html
+          out: artifacts/current/araneae-report.json
+          max-pages: "5"
+          baseline: ${{ steps.baseline.outputs['report-path'] }}
+          fail-on: new
+
+      - name: Validate action artifacts
+        run: |
+          set -euo pipefail
+          test -s "${{ steps.baseline.outputs['report-path'] }}"
+          test -s "${{ steps.current.outputs['report-path'] }}"
+          test -s "${{ steps.current.outputs['comparison-path'] }}"
+          grep -q '"entry_url"' "${{ steps.current.outputs['report-path'] }}"
+          grep -q '"links_discovered": 2' "${{ steps.current.outputs['report-path'] }}"
+          grep -q '"ok_links": 2' "${{ steps.current.outputs['report-path'] }}"
+          grep -q '"summary"' "${{ steps.current.outputs['comparison-path'] }}"
+          grep -q '"unchanged_ok": 2' "${{ steps.current.outputs['comparison-path'] }}"
+
+      - name: Upload smoke reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: araneae-action-smoke
+          path: artifacts/**/*.json
+          if-no-files-found: error

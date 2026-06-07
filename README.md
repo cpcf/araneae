@@ -252,7 +252,84 @@ araneae check https://preview.example.com/docs/ \
 
 Baseline issue identity is the normalized report link URL plus the problem value. HTTP status is reported as detail for `http_status` issues, but it is not part of the identity, so the same URL remains an existing issue if the server changes from one non-200 status to another.
 
-Minimal GitHub Actions example:
+### GitHub Action
+
+This repository includes a composite GitHub Action for docs checks. Tagged action refs try to use the matching release binary first, then fall back to running from source. Local and branch refs use the source fallback. The action enables the GitHub step summary by default, writes the JSON report to `out`, and exposes `report-path` and `comparison-path` outputs for artifact upload.
+
+Basic published docs check:
+
+```yaml
+name: docs-check
+
+on:
+  pull_request:
+
+jobs:
+  araneae:
+    runs-on: ubuntu-latest
+    steps:
+      - id: araneae
+        uses: cpcf/araneae@v1
+        with:
+          entry-url: https://docs.example.com/
+          out: araneae-report.json
+          max-pages: "1000"
+          sitemap: https://docs.example.com/sitemap.xml
+          fail-on: all
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: araneae-report
+          path: ${{ steps.araneae.outputs['report-path'] }}
+```
+
+Preview URL check with auth headers from secrets:
+
+```yaml
+      - id: araneae
+        uses: cpcf/araneae@v1
+        with:
+          entry-url: https://preview.example.com/docs/
+          out: araneae-report.json
+          path-prefix: /docs/
+          headers: |
+            Authorization: Bearer ${{ secrets.DOCS_PREVIEW_TOKEN }}
+          fail-on: all
+```
+
+Baseline artifact flow:
+
+```yaml
+      - name: Fetch previous report
+        run: |
+          mkdir -p baseline
+          ./scripts/fetch-previous-araneae-report baseline/araneae-report.json || true
+      - id: baseline
+        run: |
+          if [ -f baseline/araneae-report.json ]; then
+            echo "path=baseline/araneae-report.json" >> "$GITHUB_OUTPUT"
+            echo "fail_on=new" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=" >> "$GITHUB_OUTPUT"
+            echo "fail_on=all" >> "$GITHUB_OUTPUT"
+          fi
+      - id: araneae
+        uses: cpcf/araneae@v1
+        with:
+          entry-url: https://preview.example.com/docs/
+          out: artifacts/araneae-report.json
+          baseline: ${{ steps.baseline.outputs.path }}
+          fail-on: ${{ steps.baseline.outputs.fail_on }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: araneae-report
+          path: |
+            ${{ steps.araneae.outputs['report-path'] }}
+            ${{ steps.araneae.outputs['comparison-path'] }}
+```
+
+Minimal raw-command GitHub Actions example:
 
 ```yaml
 name: docs-check

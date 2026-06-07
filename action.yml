@@ -1,0 +1,244 @@
+name: Araneae Docs Check
+description: Run araneae check for documentation sites.
+
+inputs:
+  entry-url:
+    description: Entry URL to crawl.
+    required: true
+  out:
+    description: JSON report path.
+    required: false
+    default: araneae-report.json
+  max-pages:
+    description: Maximum number of same-scope fetch URLs to check.
+    required: false
+    default: ""
+  path-prefix:
+    description: Optional path prefix restriction.
+    required: false
+    default: ""
+  allow-host:
+    description: Newline-separated additional exact origins allowed for crawl.
+    required: false
+    default: ""
+  sitemap:
+    description: Newline-separated XML sitemap URLs to seed the crawl.
+    required: false
+    default: ""
+  baseline:
+    description: Previous JSON report to compare against.
+    required: false
+    default: ""
+  headers:
+    description: 'Newline-separated HTTP request headers in "Name: value" form.'
+    required: false
+    default: ""
+  fail-on:
+    description: Failure mode for link issues, either all or new.
+    required: false
+    default: all
+
+outputs:
+  report-path:
+    description: Path to the JSON report.
+    value: ${{ steps.check.outputs['report-path'] }}
+  comparison-path:
+    description: Path to the baseline comparison JSON report when baseline is provided.
+    value: ${{ steps.check.outputs['comparison-path'] }}
+
+runs:
+  using: composite
+  steps:
+    - id: install
+      name: Resolve Araneae command
+      shell: bash
+      env:
+        ACTION_REF: ${{ github.action_ref }}
+        RUNNER_OS_NAME: ${{ runner.os }}
+        RUNNER_ARCH_NAME: ${{ runner.arch }}
+      run: |
+        set -euo pipefail
+
+        mode=source
+        binary=
+
+        case "$RUNNER_OS_NAME" in
+          Linux) goos=linux ;;
+          macOS) goos=darwin ;;
+          Windows) goos=windows ;;
+          *)
+            echo "::error::Unsupported runner OS: $RUNNER_OS_NAME"
+            exit 1
+            ;;
+        esac
+
+        case "$RUNNER_ARCH_NAME" in
+          X64) goarch=amd64 ;;
+          ARM64) goarch=arm64 ;;
+          *)
+            echo "::error::Unsupported runner architecture: $RUNNER_ARCH_NAME"
+            exit 1
+            ;;
+        esac
+
+        if [[ "${ACTION_REF:-}" == v* ]]; then
+          work_dir="${RUNNER_TEMP:-/tmp}/araneae-action"
+          archive="araneae-${ACTION_REF}-${goos}-${goarch}.tar.gz"
+          url="https://github.com/cpcf/araneae/releases/download/${ACTION_REF}/${archive}"
+          mkdir -p "$work_dir"
+          if curl -fsSL "$url" -o "$work_dir/$archive"; then
+            tar -xzf "$work_dir/$archive" -C "$work_dir"
+            exe=araneae
+            if [ "$goos" = windows ]; then
+              exe=araneae.exe
+            fi
+            if [ -x "$work_dir/$exe" ]; then
+              mode=binary
+              binary="$work_dir/$exe"
+            else
+              echo "::warning::Release archive did not contain executable $exe; falling back to source execution"
+            fi
+          else
+            echo "::warning::No release binary found for ${ACTION_REF}; falling back to source execution"
+          fi
+        fi
+
+        if [ "$mode" = source ] && [ ! -d "$GITHUB_ACTION_PATH/cmd/araneae" ]; then
+          echo "::error::Source fallback is unavailable because cmd/araneae is missing from the action checkout"
+          exit 1
+        fi
+
+        {
+          echo "mode=$mode"
+          echo "binary=$binary"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Set up Go for source execution
+      if: ${{ steps.install.outputs.mode == 'source' }}
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: ${{ github.action_path }}/go.mod
+        cache-dependency-path: ${{ github.action_path }}/go.sum
+
+    - id: source
+      name: Build Araneae from source
+      if: ${{ steps.install.outputs.mode == 'source' }}
+      shell: bash
+      env:
+        RUNNER_OS_NAME: ${{ runner.os }}
+      run: |
+        set -euo pipefail
+
+        work_dir="${RUNNER_TEMP:-/tmp}/araneae-action"
+        mkdir -p "$work_dir"
+
+        binary="$work_dir/araneae-source"
+        if [ "$RUNNER_OS_NAME" = Windows ]; then
+          binary="$work_dir/araneae-source.exe"
+        fi
+
+        (cd "$GITHUB_ACTION_PATH" && go build -trimpath -o "$binary" ./cmd/araneae)
+        echo "binary=$binary" >> "$GITHUB_OUTPUT"
+
+    - id: check
+      name: Run Araneae check
+      shell: bash
+      env:
+        ARANEAE_MODE: ${{ steps.install.outputs.mode }}
+        ARANEAE_BINARY: ${{ steps.install.outputs.binary }}
+        ARANEAE_SOURCE_BINARY: ${{ steps.source.outputs.binary }}
+        INPUT_ENTRY_URL: ${{ inputs.entry-url }}
+        INPUT_OUT: ${{ inputs.out }}
+        INPUT_MAX_PAGES: ${{ inputs.max-pages }}
+        INPUT_PATH_PREFIX: ${{ inputs.path-prefix }}
+        INPUT_ALLOW_HOST: ${{ inputs.allow-host }}
+        INPUT_SITEMAP: ${{ inputs.sitemap }}
+        INPUT_BASELINE: ${{ inputs.baseline }}
+        INPUT_HEADERS: ${{ inputs.headers }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+      run: |
+        set -euo pipefail
+
+        append_repeated_flag() {
+          local flag="$1"
+          local values="$2"
+          local value
+          while IFS= read -r value; do
+            value="${value%$'\r'}"
+            if [ -n "$value" ]; then
+              args+=("$flag" "$value")
+            fi
+          done <<< "$values"
+        }
+
+        comparison_path_for() {
+          local report_path="$1"
+          local dir
+          local base
+          local stem
+          dir="$(dirname "$report_path")"
+          base="$(basename "$report_path")"
+          if [[ "$base" == *.* ]]; then
+            stem="${base%.*}"
+          else
+            stem="$base"
+          fi
+          if [ "$dir" = . ]; then
+            printf '%s-comparison.json' "$stem"
+          else
+            printf '%s/%s-comparison.json' "$dir" "$stem"
+          fi
+        }
+
+        if [ -z "$INPUT_ENTRY_URL" ]; then
+          echo "::error::entry-url input is required"
+          exit 1
+        fi
+
+        report_path="${INPUT_OUT:-araneae-report.json}"
+        mkdir -p "$(dirname "$report_path")"
+
+        if [ "$ARANEAE_MODE" = binary ]; then
+          cmd=("$ARANEAE_BINARY")
+        else
+          cmd=("$ARANEAE_SOURCE_BINARY")
+        fi
+        if [ -z "${cmd[0]}" ]; then
+          echo "::error::Araneae executable was not resolved"
+          exit 1
+        fi
+
+        args=(
+          check "$INPUT_ENTRY_URL"
+          --out "$report_path"
+          --fail-on-dead
+          --fail-on-non-200
+          --fail-on-truncated
+          --fail-on "$INPUT_FAIL_ON"
+          --summary markdown
+          --ci
+        )
+
+        if [ -n "$INPUT_MAX_PAGES" ]; then
+          args+=(--max-pages "$INPUT_MAX_PAGES")
+        fi
+        if [ -n "$INPUT_PATH_PREFIX" ]; then
+          args+=(--path-prefix "$INPUT_PATH_PREFIX")
+        fi
+        append_repeated_flag --allow-host "$INPUT_ALLOW_HOST"
+        append_repeated_flag --sitemap "$INPUT_SITEMAP"
+        append_repeated_flag --header "$INPUT_HEADERS"
+
+        comparison_path=
+        if [ -n "$INPUT_BASELINE" ]; then
+          comparison_path="$(comparison_path_for "$report_path")"
+          mkdir -p "$(dirname "$comparison_path")"
+          args+=(--baseline "$INPUT_BASELINE" --comparison-out "$comparison_path")
+        fi
+
+        {
+          echo "report-path=$report_path"
+          echo "comparison-path=$comparison_path"
+        } >> "$GITHUB_OUTPUT"
+
+        "${cmd[@]}" "${args[@]}"
